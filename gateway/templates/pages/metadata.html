@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}元数据管理 — OntoL{% endblock %}
+
+{% block extra_head %}
+<style>
+.meta-page { max-width: 1100px; margin: 2rem auto; }
+.meta-page h1 { margin-bottom: 0.5rem; }
+.meta-page .desc { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.5rem; }
+.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+.meta-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.3rem; }
+.meta-card h3 { display: flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; margin-bottom: 1rem; color: var(--accent); }
+.meta-card h3 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+.meta-table { width: 100%; font-size: 0.82rem; }
+.meta-table th { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.meta-table td { padding: 0.45rem 0.5rem; border-bottom: 1px solid rgba(0,212,255,0.06); }
+.meta-table td code { font-size: 0.78rem; color: var(--accent); background: rgba(0,212,255,0.06); padding: 0.1rem 0.4rem; border-radius: 3px; }
+.meta-table .good { color: #22c55e; }
+.meta-table .warn { color: #f59e0b; }
+.meta-table .bad { color: #ef4444; }
+
+.meta-empty { text-align: center; color: var(--text-dim); padding: 2rem 0; font-size: 0.82rem; }
+.meta-spin { display: flex; align-items: center; justify-content: center; padding: 2rem; color: var(--text-dim); gap: 0.5rem; }
+.meta-spin .spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="meta-page">
+    <h1>📊 元数据管理</h1>
+    <p class="desc">Neo4j 知识图谱 & SQLite 本体模型的全局统计信息</p>
+
+    <div class="meta-grid" id="metaGrid">
+        <div class="meta-spin" style="grid-column:1/-1;"><div class="spinner"></div> 加载中...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const NEO4J = '/api/v1/ontology';
+const MODEL = '/api/v1/ontology-models';
+
+async function load() {
+    try {
+        const [schema, stats] = await Promise.all([
+            fetch(NEO4J + '/schema').then(r => r.ok ? r.json() : null),
+            fetch(MODEL + '/stats').then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        renderMeta(schema, stats);
+    } catch(e) {
+        document.getElementById('metaGrid').innerHTML = `<div class="meta-empty" style="grid-column:1/-1;">❌ ${e.message}</div>`;
+    }
+}
+
+function renderMeta(schema, stats) {
+    const neoOk = !!schema;
+    const sqliteOk = !!stats;
+
+    // Neo4j
+    const labels = schema?.labels || [];
+    const rels = schema?.relationship_types || [];
+    const nCnt = schema?.node_count ?? '—';
+    const eCnt = schema?.edge_count ?? '—';
+
+    // SQLite
+    const mCnt = stats?.model_count ?? '—';
+    const aCnt = stats?.attr_count ?? '—';
+
+    // 标签统计
+    const labelTable = labels.length ? labels.map(l => `<tr><td><code>${escHtml(l)}</code></td><td class="good">●</td></tr>`).join('')
+        : '<tr><td colspan="2" class="meta-empty">无数据</td></tr>';
+
+    // 关系统计
+    const relTable = rels.length ? rels.map(r => `<tr><td><code>${escHtml(r)}</code></td></tr>`).join('')
+        : '<tr><td class="meta-empty">无数据</td></tr>';
+
+    document.getElementById('metaGrid').innerHTML = `
+        <!-- Neo4j 概览 -->
+        <div class="meta-card">
+            <h3><span class="dot"></span> Neo4j 知识图谱</h3>
+            <div style="display:flex;gap:2rem;margin-bottom:1rem;font-size:0.84rem;">
+                <span>📦 节点 <b style="color:#f59e0b;">${nCnt}</b></span>
+                <span>🔗 关系 <b style="color:#f59e0b;">${eCnt}</b></span>
+                <span>🏷 标签 <b style="color:#f59e0b;">${labels.length}</b></span>
+                <span>📤 关系类型 <b style="color:#f59e0b;">${rels.length}</b></span>
+            </div>
+            <table class="meta-table">
+                <thead><tr><th>标签</th><th style="width:40px;">状态</th></tr></thead>
+                <tbody>${labelTable}</tbody>
+            </table>
+        </div>
+
+        <!-- SQLite 概览 -->
+        <div class="meta-card">
+            <h3><span class="dot"></span> 本体模型 (SQLite)</h3>
+            <div style="display:flex;gap:2rem;margin-bottom:1rem;font-size:0.84rem;">
+                <span>📋 模型 <b style="color:var(--accent);">${mCnt}</b></span>
+                <span>🔧 字段 <b style="color:var(--accent);">${aCnt}</b></span>
+            </div>
+            <p style="font-size:0.78rem;color:var(--text-dim);">本体结构定义在 SQLite 文件数据库 (ontol.db)，无需外部服务。</p>
+        </div>
+
+        <!-- 关系类型 -->
+        <div class="meta-card">
+            <h3><span class="dot"></span> 关系类型</h3>
+            <table class="meta-table">
+                <thead><tr><th>类型名</th></tr></thead>
+                <tbody>${relTable}</tbody>
+            </table>
+        </div>
+
+        <!-- 节点标签详情 -->
+        <div class="meta-card">
+            <h3><span class="dot"></span> 节点标签详情</h3>
+            <table class="meta-table">
+                <thead><tr><th>标签</th><th>中文名</th></tr></thead>
+                <tbody>
+                    ${labels.map(l => `<tr><td><code>${escHtml(l)}</code></td><td style="color:var(--text-dim);">${({'Entity':'实体','Individual':'个体','Class':'分类','Property':'属性','Patrol':'巡逻任务','Type':'类型定义'})[l]||'—'}</td></tr>`).join('') || '<tr><td colspan="2" class="meta-empty">无数据</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 服务状态 -->
+        <div class="meta-card" style="grid-column:1/-1;">
+            <h3><span class="dot"></span> 服务状态</h3>
+            <table class="meta-table">
+                <thead><tr><th>服务</th><th>后端</th><th>状态</th></tr></thead>
+                <tbody>
+                    <tr><td>Neo4j</td><td>neo4j://127.0.0.1:7687</td><td class="${neoOk?'good':'bad'}">${neoOk?'● 在线':'● 离线'}</td></tr>
+                    <tr><td>SQLite</td><td>infrastructure/db/ontol.db</td><td class="${sqliteOk?'good':'bad'}">${sqliteOk?'● 在线':'● 离线'}</td></tr>
+                </tbody>
+            </table>
+        </div>`;
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+document.addEventListener('DOMContentLoaded', load);
+</script>
+{% endblock %}

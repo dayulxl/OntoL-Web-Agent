@@ -1,0 +1,509 @@
+{% extends "base.html" %}
+{% block title %}文件上传 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<style>
+.upload-page { max-width: 960px; margin: 2rem auto; display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.upload-left { flex: 1; min-width: 340px; }
+.upload-right { width: 360px; min-width: 300px; }
+
+.dropzone {
+    border: 2px dashed var(--border); border-radius: 12px;
+    padding: 2rem; text-align: center; cursor: pointer;
+    transition: all 0.25s; background: rgba(0,212,255,0.02); margin-bottom: 1rem;
+}
+.dropzone:hover, .dropzone.dragover {
+    border-color: var(--accent); background: rgba(0,212,255,0.06);
+    box-shadow: 0 0 24px var(--primary-glow);
+}
+.dropzone .icon { font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.5; }
+.dropzone p { color: var(--text-dim); font-size: 0.85rem; }
+.dropzone p b { color: var(--accent); }
+
+.file-item {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.5rem 0.8rem; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 6px;
+    margin-bottom: 0.4rem; font-size: 0.82rem;
+}
+.file-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-item .fsize { font-size: 0.72rem; color: var(--text-dim); flex-shrink: 0; }
+.file-item .fstatus { font-size: 0.68rem; padding: 0.1rem 0.4rem; border-radius: 3px; flex-shrink: 0; }
+.fstatus.pending { color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+.fstatus.uploading { color: #3b82f6; border: 1px solid rgba(59,130,246,0.3); }
+.fstatus.done { color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+.fstatus.error { color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.file-item .fremove { cursor: pointer; color: var(--text-dim); font-size: 0.85rem; }
+.file-item .fremove:hover { color: #ef4444; }
+
+.upload-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+
+/* 历史面板 */
+.history-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem; max-height: 500px; overflow-y: auto;
+}
+.history-card h3 { font-size: 0.9rem; color: var(--accent); margin-bottom: 0.8rem;
+    display: flex; align-items: center; gap: 0.4rem; }
+.history-card h3 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.history-item { padding: 0.4rem 0; border-bottom: 1px solid rgba(0,212,255,0.06); font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; }
+.history-item:last-child { border-bottom: none; }
+.history-item .hinfo { flex: 1; min-width: 0; }
+.history-item .hname { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-item .hmeta { color: var(--text-dim); font-size: 0.68rem; margin-top: 0.1rem; }
+.history-item .haction { display: flex; gap: 0.3rem; flex-shrink: 0; }
+.history-item .hbtn { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text-dim); font-size: 0.65rem; padding: 0.15rem 0.4rem; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.history-item .hbtn:hover { border-color: var(--accent); color: var(--accent); }
+.history-item .hbtn.danger:hover { border-color: #ef4444; color: #ef4444; }
+.history-empty { text-align: center; color: var(--text-dim); font-size: 0.78rem; padding: 1.5rem 0; }
+.history-card::-webkit-scrollbar { width: 4px; }
+.history-card::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+
+.toast {
+    position: fixed; top: 80px; right: 1.5rem;
+    padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.82rem; z-index: 999;
+    animation: fadeIn 0.3s ease;
+}
+.toast.success { background: rgba(34,197,94,0.18); border: 1px solid rgba(34,197,94,0.4); color: #22c55e; }
+.toast.error { background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.4); color: #ef4444; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 预览弹窗 */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 200; display: none; align-items: center; justify-content: center; }
+.modal-overlay.open { display: flex; }
+.modal-box { background: var(--bg-mid); border: 1px solid var(--border); border-radius: 12px; width: 90vw; max-width: 960px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 0.8rem 1.2rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.modal-header h3 { margin: 0; font-size: 0.95rem; color: var(--accent); }
+.modal-header .btn-close { background: none; border: none; color: var(--text-dim); font-size: 1.3rem; cursor: pointer; padding: 0.2rem 0.5rem; }
+.modal-header .btn-close:hover { color: var(--accent); }
+.modal-body { flex: 1; overflow-y: auto; padding: 1.2rem; }
+.modal-body::-webkit-scrollbar { width: 6px; }
+.modal-body::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 3px; }
+.modal-body pre { white-space: pre-wrap; word-break: break-all; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; line-height: 1.6; color: var(--text); margin: 0; }
+.modal-body iframe { width: 100%; height: 70vh; border: none; border-radius: 6px; background: #fff; }
+.modal-body .download-btn { display: inline-block; margin-top: 1rem; }
+.history-item { cursor: pointer; }
+.modal-body .triple-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 1rem; }
+.modal-body .triple-table th { text-align: left; padding: 0.5rem; background: rgba(0,212,255,0.06); color: var(--accent); font-size: 0.7rem; text-transform: uppercase; }
+.modal-body .triple-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid rgba(0,212,255,0.06); color: var(--text); }
+.modal-body .triple-table td.subj { color: #f59e0b; }
+.modal-body .triple-table td.pred { color: var(--accent); }
+.modal-body .triple-table td.obj { color: #22c55e; }
+.modal-footer { padding: 0.8rem 1.2rem; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; gap: 0.5rem; justify-content: flex-end; }
+.modal-body .parse-loading { display: flex; align-items: center; gap: 0.6rem; color: var(--accent); padding: 2rem 0; justify-content: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upload-page">
+
+    <!-- 左：上传区 -->
+    <div class="upload-left">
+        <h1 style="margin-bottom:0.3rem;">📤 文件上传</h1>
+        <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.5rem;">.owl · .rdf · .json · .swrl · .csv · .txt · .doc · .docx · .xls · .xlsx · .pdf (≤ 50MB)</p>
+
+        <div style="margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;">
+            <label style="font-size:0.78rem;color:var(--text-dim);white-space:nowrap;">解析模型:</label>
+            <select id="parseModel" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:0.3rem 0.6rem;border-radius:6px;font-size:0.8rem;flex:1;">
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="claude-sonnet-4-6">Claude Sonnet 4</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4</option>
+            </select>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+            <div class="icon">📂</div>
+            <p>拖拽文件到此处，或 <b>点击选择</b></p>
+            <input type="file" id="fileInput" multiple hidden
+                   accept=".owl,.rdf,.json,.swrl,.csv,.txt,.xml,.ttl,.nt,.doc,.docx,.xls,.xlsx,.pdf" />
+        </div>
+
+        <div id="fileList"></div>
+
+        <div class="upload-actions">
+            <button class="btn" onclick="clearFiles()">清除</button>
+            <button class="btn primary" id="uploadBtn" onclick="startUpload()">⬆ 全部上传</button>
+        </div>
+    </div>
+
+    <!-- 右：上传历史 -->
+    <div class="upload-right">
+        <div class="history-card" id="historyCard">
+            <h3><span class="dot"></span> 历史上传</h3>
+            <div id="historyList"><div class="history-empty">加载中...</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- 预览弹窗 -->
+<div class="modal-overlay" id="previewModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3 id="modalTitle">📄 文件预览</h3>
+            <button class="btn-close" onclick="closePreviewModal()">✕</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+
+<!-- 三元组解析弹窗 -->
+<div class="modal-overlay" id="parseModal">
+    <div class="modal-box" style="max-width:1100px;">
+        <div class="modal-header">
+            <h3 id="parseTitle">🔍 三元组解析</h3>
+            <button class="btn-close" onclick="closeParseModal()">✕</button>
+        </div>
+        <div class="modal-body" id="parseBody"></div>
+        <div class="modal-footer" id="parseFooter"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const UPLOAD_API = '/api/v1/upload';
+const MAX_SIZE = 50 * 1024 * 1024;
+let pendingFiles = [];
+
+// ── 拖拽 ──
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => addFiles(fileInput.files));
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    addFiles(e.dataTransfer.files);
+});
+
+const ALLOWED_EXTS = ['.owl','.rdf','.json','.swrl','.csv','.txt','.xml','.ttl','.nt','.doc','.docx','.xls','.xlsx','.pdf'];
+
+function addFiles(fileList) {
+    for (const f of fileList) {
+        if (f.size > MAX_SIZE) { showToast(`"${f.name}" 超过 50MB`, 'error'); continue; }
+        const ext = '.' + (f.name || '').split('.').pop().toLowerCase();
+        if (!ALLOWED_EXTS.includes(ext)) { showToast(`"${f.name}" 格式不支持`, 'error'); continue; }
+        if (pendingFiles.some(p => p.name === f.name && p.size === f.size && p.lastModified === f.lastModified)) continue;
+        pendingFiles.push(f);
+    }
+    renderFileList();
+}
+
+function removeFile(idx) { pendingFiles.splice(idx, 1); renderFileList(); }
+function clearFiles() { pendingFiles = []; renderFileList(); }
+function formatSize(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderFileList() {
+    const list = document.getElementById('fileList');
+    if (pendingFiles.length === 0) { list.innerHTML = ''; return; }
+    list.innerHTML = pendingFiles.map((f, i) =>
+        `<div class="file-item" id="file-${i}">
+            <span>📄</span>
+            <span class="fname" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+            <span class="fsize">${formatSize(f.size)}</span>
+            <span class="fstatus pending" id="status-${i}">待上传</span>
+            <span class="fremove" onclick="removeFile(${i})" title="移除">✕</span>
+        </div>`
+    ).join('');
+}
+
+// ── 上传 ──
+async function startUpload() {
+    if (pendingFiles.length === 0) return;
+    const btn = document.getElementById('uploadBtn');
+    btn.disabled = true; btn.textContent = '上传中...';
+    let ok = 0, fail = 0;
+    for (let i = 0; i < pendingFiles.length; i++) {
+        const f = pendingFiles[i];
+        const s = document.getElementById('status-' + i);
+        if (s) { s.textContent = '上传中'; s.className = 'fstatus uploading'; }
+        try {
+            const fd = new FormData(); fd.append('file', f);
+            const r = await fetch(UPLOAD_API, { method: 'POST', body: fd });
+            if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+            if (s) { s.textContent = '✓'; s.className = 'fstatus done'; }
+            ok++;
+        } catch(e) {
+            if (s) { s.textContent = '失败'; s.className = 'fstatus error'; }
+            fail++;
+        }
+    }
+    btn.disabled = false; btn.textContent = '⬆ 全部上传';
+    if (ok > 0) showToast(`成功 ${ok} 个${fail ? `，失败 ${fail} 个` : ''}`, fail ? 'error' : 'success');
+    // 刷新历史
+    loadHistory();
+}
+
+// ── 预览弹窗 ──
+function openPreviewModal(title) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('previewModal').classList.add('open');
+}
+function closePreviewModal() {
+    document.getElementById('previewModal').classList.remove('open');
+    document.getElementById('modalBody').innerHTML = '';
+}
+function openParseModal(title) {
+    document.getElementById('parseTitle').textContent = title;
+    document.getElementById('parseModal').classList.add('open');
+}
+function closeParseModal() {
+    document.getElementById('parseModal').classList.remove('open');
+    document.getElementById('parseBody').innerHTML = '';
+    document.getElementById('parseFooter').innerHTML = '';
+}
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closePreviewModal(); closeParseModal(); }
+});
+document.getElementById('previewModal').addEventListener('click', function(e) {
+    if (e.target === this) closePreviewModal();
+});
+document.getElementById('parseModal').addEventListener('click', function(e) {
+    if (e.target === this) closeParseModal();
+});
+
+async function previewFile(filename) {
+    openPreviewModal('📄 ' + filename);
+    const body = document.getElementById('modalBody');
+    body.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);">加载中...</div>';
+
+    try {
+        const r = await fetch(UPLOAD_API + '/preview/' + encodeURIComponent(filename));
+        if (!r.ok) throw new Error('文件不存在');
+
+        const contentType = r.headers.get('content-type') || '';
+        if (contentType.includes('application/pdf')) {
+            // PDF inline
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            body.innerHTML = `<iframe src="${url}"></iframe>
+                <a class="btn download-btn" href="${url}" download="${filename}">📥 下载</a>`;
+        } else if (contentType.includes('text') || contentType.includes('json')) {
+            const data = await r.json();
+            if (data.type === 'text') {
+                body.innerHTML = `<pre>${escHtml(data.content || '')}</pre>
+                    <a class="btn download-btn" href="${UPLOAD_API}/preview/${encodeURIComponent(filename)}" download="${filename}">📥 下载</a>`;
+            } else {
+                throw new Error('Unknown response');
+            }
+        } else {
+            // 二进制 Office 文件 — 提供下载
+            body.innerHTML = `
+                <div style="text-align:center;padding:2rem;">
+                    <div style="font-size:3rem;margin-bottom:1rem;">📦</div>
+                    <p style="color:var(--text-dim);">此文件格式不支持在线预览</p>
+                    <p style="font-size:0.78rem;color:var(--text-dim);">可下载后在本地 Word / Excel / PDF 中打开</p>
+                    <a class="btn download-btn" href="${UPLOAD_API}/preview/${encodeURIComponent(filename)}" download="${filename}">📥 下载文件</a>
+                </div>`;
+        }
+    } catch(e) {
+        body.innerHTML = `<div style="color:#ef4444;text-align:center;padding:2rem;">❌ ${escHtml(e.message)}</div>`;
+    }
+}
+
+// ── 删除 ──
+async function deleteFile(filename) {
+    if (!confirm(`确定删除 "${filename}" 吗？此操作不可恢复。`)) return;
+    try {
+        const r = await fetch(UPLOAD_API + '/' + encodeURIComponent(filename), { method: 'DELETE' });
+        if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+        showToast(`已删除 "${filename}"`, 'success');
+        loadHistory();
+    } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
+}
+
+// ── 本体类型映射 ──
+const ONT_TYPE_NAMES = {
+    'M_ENTITY': '实体', 'M_BEHAVIOR': '行为', 'M_RULE': '规则',
+    'M_SCENE': '场景', 'M_AGENT': '主体', 'M_EXCEPTION': '异常补偿',
+    'M_QUALITY': '质量约束', 'M_EVENT': '事件', 'M_TEMPLATE': '模板',
+    'M_ROOT': '根节点', 'M_BASE_ONTOLOGY': '基本本体',
+};
+const ONT_TYPE_COLORS = {
+    'M_ENTITY': '#3b82f6', 'M_BEHAVIOR': '#f59e0b', 'M_RULE': '#a855f7',
+    'M_SCENE': '#22c55e', 'M_AGENT': '#ef4444', 'M_EXCEPTION': '#f97316',
+    'M_QUALITY': '#06b6d4', 'M_EVENT': '#ec4899', 'M_TEMPLATE': '#6b7280',
+    'M_ROOT': '#3b82f6', 'M_BASE_ONTOLOGY': '#3b82f6',
+};
+
+// ── 解析 & 导入 ──
+let parsedEntities = [];
+let parsedRelationships = [];
+let parsedFilename = '';
+
+async function parseFile(filename) {
+    openParseModal('🔍 本体解析: ' + filename);
+    const body = document.getElementById('parseBody');
+    const footer = document.getElementById('parseFooter');
+    body.innerHTML = '<div class="parse-loading"><div class="ot-spinner"></div>AI 大模型正在识别本体类型并提取字段...</div>';
+    footer.innerHTML = '';
+
+    try {
+        const r = await fetch(UPLOAD_API + '/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename, model: document.getElementById('parseModel').value }),
+        });
+        if (!r.ok) {
+            const err = await r.json();
+            throw new Error(err.detail || r.statusText);
+        }
+        const data = await r.json();
+        parsedEntities = data.entities || [];
+        parsedRelationships = data.relationships || [];
+        parsedFilename = data.filename || filename;
+
+        if (parsedEntities.length === 0) {
+            body.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);">未解析出本体实体，请检查文件内容</div>';
+            return;
+        }
+
+        // ── 按类型分组统计 ──
+        const typeCounts = data.type_counts || {};
+        const typeStats = Object.entries(typeCounts)
+            .sort((a,b) => b[1] - a[1])
+            .map(([t, c]) => `<span style="display:inline-block;margin:0.15rem;padding:0.15rem 0.5rem;border-radius:10px;font-size:0.72rem;background:${ONT_TYPE_COLORS[t]||'#888'}22;border:1px solid ${ONT_TYPE_COLORS[t]||'#888'}44;color:${ONT_TYPE_COLORS[t]||'#ccc'};">${ONT_TYPE_NAMES[t]||t} ×${c}</span>`)
+            .join('');
+
+        // ── 构建实体表格 ──
+        const entityRows = parsedEntities.map((e, i) => {
+            const ont = e.ont_type || 'M_ENTITY';
+            const color = ONT_TYPE_COLORS[ont] || '#888';
+            const typeName = ONT_TYPE_NAMES[ont] || ont;
+            const props = e.properties || {};
+            const propsStr = Object.entries(props)
+                .filter(([k]) => k !== 'name')
+                .map(([k,v]) => `<span style="color:var(--text-dim);font-size:0.68rem;" title="${escHtml(String(v||''))}">${escHtml(k)}</span>`)
+                .join(' ');
+            return `<tr>
+                <td style="color:var(--text-dim);">${i+1}</td>
+                <td style="color:${color};font-weight:600;">${escHtml(e.name||'')}</td>
+                <td><span style="background:${color}22;border:1px solid ${color}44;color:${color};padding:0.1rem 0.4rem;border-radius:8px;font-size:0.7rem;">${typeName}</span></td>
+                <td style="font-size:0.7rem;">${propsStr || '<span style="color:var(--text-dim);">—</span>'}</td>
+            </tr>`;
+        }).join('');
+
+        body.innerHTML = `
+            <div style="margin-bottom:0.8rem;">
+                <p style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.3rem;">
+                    📊 <b style="color:var(--accent);">${parsedEntities.length}</b> 个本体实体 ·
+                    🔗 <b style="color:#f59e0b;">${parsedRelationships.length}</b> 条关系
+                </p>
+                <div>${typeStats}</div>
+            </div>
+            <table class="triple-table">
+                <thead><tr><th>#</th><th>名称</th><th>本体类型</th><th>属性字段</th></tr></thead>
+                <tbody>${entityRows}</tbody>
+            </table>`;
+
+        // ── 关系预览（折叠）──
+        if (parsedRelationships.length > 0) {
+            const relPreview = parsedRelationships.slice(0, 50).map(r =>
+                `<span style="color:#f59e0b;">${escHtml(r.subject)}</span> → <span style="color:var(--accent);">${escHtml(r.predicate)}</span> → <span style="color:#22c55e;">${escHtml(r.object)}</span>`
+            ).join('<br>');
+            body.innerHTML += `
+                <details style="margin-top:0.8rem;font-size:0.72rem;">
+                    <summary style="cursor:pointer;color:var(--accent);">🔗 关系列表 (${parsedRelationships.length} 条)</summary>
+                    <div style="padding:0.5rem;max-height:200px;overflow-y:auto;line-height:1.8;">${relPreview}${parsedRelationships.length > 50 ? '<br>...' : ''}</div>
+                </details>`;
+        }
+
+        footer.innerHTML = `
+            <button class="btn" onclick="closeParseModal()">取消</button>
+            <button class="btn btn-accent" onclick="importEntities()" style="background:rgba(34,197,94,0.15)!important;border-color:#22c55e!important;color:#22c55e!important;">
+                📥 导入 Neo4j (${parsedEntities.length} 实体 · ${parsedRelationships.length} 关系)
+            </button>`;
+    } catch(e) {
+        body.innerHTML = `<div style="color:#ef4444;text-align:center;padding:2rem;">❌ 解析失败: ${escHtml(e.message)}</div>`;
+    }
+}
+
+async function importEntities() {
+    if (parsedEntities.length === 0) return;
+    const footer = document.getElementById('parseFooter');
+    footer.innerHTML = '<div class="parse-loading"><div class="ot-spinner"></div>正在导入 Neo4j...</div>';
+
+    try {
+        const r = await fetch(UPLOAD_API + '/import-entities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: parsedFilename, entities: parsedEntities, relationships: parsedRelationships }),
+        });
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch { throw new Error(text.substring(0, 200)); }
+        if (!r.ok) throw new Error(data.detail || text.substring(0, 100));
+        showToast(`✅ 导入完成: ${data.nodes_created} 节点 · ${data.edges_created} 关系`, 'success');
+        footer.innerHTML = `
+            <span style="color:#22c55e;font-size:0.82rem;margin-right:auto;">✅ 导入 Neo4j 成功 — ${data.nodes_created} 节点 · ${data.edges_created} 关系</span>
+            <button class="btn" onclick="closeParseModal()">关闭</button>`;
+    } catch(e) {
+        footer.innerHTML = `
+            <span style="color:#ef4444;font-size:0.82rem;margin-right:auto;">❌ ${escHtml(e.message)}</span>
+            <button class="btn" onclick="closeParseModal()">关闭</button>`;
+    }
+}
+
+// 兼容旧函数名
+function importTriples() {
+    // Map old triples to new entities format and call importEntities
+    if (parsedTriples && parsedTriples.length > 0 && parsedEntities.length === 0) {
+        // Legacy: convert triples to entities
+        const nameSet = new Set();
+        parsedEntities = [];
+        parsedTriples.forEach(t => {
+            if (!nameSet.has(t.subject)) { nameSet.add(t.subject); parsedEntities.push({name:t.subject,ont_type:'M_ENTITY',properties:{name:t.subject}}); }
+            if (!nameSet.has(t.object)) { nameSet.add(t.object); parsedEntities.push({name:t.object,ont_type:'M_ENTITY',properties:{name:t.object}}); }
+        });
+        parsedRelationships = parsedTriples;
+    }
+    importEntities();
+}
+
+// ── 历史 ──
+async function loadHistory() {
+    try {
+        const r = await fetch(UPLOAD_API + '/history');
+        const history = r.ok ? await r.json() : [];
+        const el = document.getElementById('historyList');
+        if (!history.length) { el.innerHTML = '<div class="history-empty">暂无上传记录</div>'; return; }
+        el.innerHTML = history.map(h => `
+            <div class="history-item">
+                <div class="hinfo" onclick="previewFile('${escHtml(h.filename)}')" title="点击预览">
+                    <div class="hname">📄 ${escHtml(h.filename)}</div>
+                    <div class="hmeta">${formatSize(h.size)} · ${(h.uploaded_at || '').substring(0,16).replace('T',' ')}</div>
+                </div>
+                <div class="haction">
+                    <button class="hbtn" onclick="event.stopPropagation();parseFile('${escHtml(h.filename)}')" title="AI 解析三元组">🔍</button>
+                    <a class="hbtn" href="${UPLOAD_API}/preview/${encodeURIComponent(h.filename)}" download="${escHtml(h.filename)}" title="下载" onclick="event.stopPropagation()">⬇</a>
+                    <button class="hbtn danger" onclick="event.stopPropagation();deleteFile('${escHtml(h.filename)}')" title="删除">🗑</button>
+                </div>
+            </div>
+        `).join('');
+    } catch(e) { /* silent */ }
+}
+
+// ── Toast ──
+function showToast(msg, type) {
+    const t = document.createElement('div');
+    t.className = 'toast ' + type;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; }, 2500);
+    setTimeout(() => t.remove(), 2800);
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+document.addEventListener('DOMContentLoaded', loadHistory);
+</script>
+{% endblock %}

@@ -1,0 +1,1586 @@
+{% extends "base.html" %}
+{% block title %}本体语义 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ============================================================
+   本体语义 — 左树右详情 布局
+   ============================================================ */
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+/* ---- 主布局 ---- */
+.ot-layout {
+    display: flex;
+    height: calc(100vh - 60px);
+    position: relative;
+    z-index: 1;
+}
+
+/* ============================================================
+   左侧面板 — 树形目录
+   ============================================================ */
+.ot-sidebar {
+    width: 300px;
+    min-width: 300px;
+    background: rgba(8, 12, 32, 0.96);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    backdrop-filter: blur(12px);
+}
+
+/* 搜索框 */
+.ot-sidebar-header {
+    padding: 1rem 1rem 0.6rem;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+    flex-shrink: 0;
+}
+
+.ot-search {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(0, 212, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    transition: border-color 0.2s;
+}
+.ot-search:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--primary-glow);
+}
+.ot-search .search-icon {
+    font-size: 0.9rem;
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+.ot-search input {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 0.82rem;
+    width: 100%;
+    padding: 0;
+    outline: none;
+}
+.ot-search input::placeholder { color: var(--text-dim); opacity: 0.5; }
+
+.ot-sidebar-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+}
+
+/* 树容器 */
+.ot-tree-wrap {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.5rem 0;
+}
+.ot-tree-wrap::-webkit-scrollbar { width: 4px; }
+.ot-tree-wrap::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+.ot-tree-wrap::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- 树 ---- */
+.ot-tree { list-style: none; padding: 0; margin: 0; }
+
+.ot-tree ul {
+    list-style: none;
+    padding-left: 1.4rem;
+    margin: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+/* 折叠状态 */
+.ot-tree ul.collapsed {
+    max-height: 0 !important;
+    opacity: 0;
+}
+
+/* 树节点 */
+.ot-tree li { position: relative; }
+
+.ot-tree-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 1rem 0.4rem 0.6rem;
+    cursor: pointer;
+    font-size: 0.84rem;
+    color: var(--text);
+    border-radius: 0;
+    transition: all 0.15s;
+    user-select: none;
+    position: relative;
+    white-space: nowrap;
+}
+.ot-tree-item:hover {
+    background: rgba(0, 212, 255, 0.06);
+    color: #fff;
+}
+
+/* 左侧连接线指示 */
+.ot-tree-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: transparent;
+    border-radius: 0 2px 2px 0;
+    transition: background 0.15s;
+}
+.ot-tree-item.active::before {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--primary-glow);
+}
+.ot-tree-item.active {
+    background: rgba(0, 212, 255, 0.1);
+    color: #fff;
+}
+.ot-tree-item.active .ot-tree-label {
+    color: var(--accent);
+    text-shadow: 0 0 6px var(--primary-glow);
+}
+
+/* 箭头 */
+.ot-chevron {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+.ot-chevron.expanded {
+    transform: rotate(90deg);
+    opacity: 0.9;
+}
+.ot-chevron.leaf {
+    visibility: hidden;
+}
+
+/* 图标 */
+.ot-icon {
+    width: 18px;
+    text-align: center;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+.ot-icon.folder     { color: #f59e0b; }
+.ot-icon.folder-open{ color: #fbbf24; }
+.ot-icon.template   { color: var(--accent); }
+.ot-icon.military   { color: #ef4444; }
+.ot-icon.civil      { color: #22c55e; }
+.ot-icon.custom     { color: #7c3aed; }
+
+.ot-tree-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 徽标 */
+.ot-badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 10px;
+    background: rgba(0, 212, 255, 0.1);
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+/* 树节点移动按钮 */
+.tree-move-btn {
+    background: none; border: 1px solid rgba(245,158,11,0.3);
+    color: rgba(245,158,11,0.6); font-size: 0.6rem;
+    padding: 0.05rem 0.35rem; border-radius: 3px;
+    cursor: pointer; flex-shrink: 0; opacity: 0;
+    transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+}
+.ot-tree-item:hover .tree-move-btn { opacity: 1; }
+.tree-move-btn:hover { border-color: #f59e0b; color: #f59e0b; }
+
+/* 状态信息 */
+.ot-sidebar-footer {
+    padding: 0.6rem 1rem;
+    border-top: 1px solid rgba(0, 212, 255, 0.08);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.ot-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34,197,94,0.5);
+}
+.ot-status-dot.offline { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+
+
+/* ============================================================
+   右侧面板 — 详情
+   ============================================================ */
+.ot-main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem 2.5rem;
+    background:
+        radial-gradient(ellipse at 70% 20%, rgba(0, 212, 255, 0.03) 0%, transparent 60%),
+        radial-gradient(ellipse at 30% 80%, rgba(124, 58, 237, 0.03) 0%, transparent 60%);
+}
+.ot-main::-webkit-scrollbar { width: 6px; }
+.ot-main::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 3px; }
+
+/* 空状态 */
+.ot-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100%;
+    text-align: center;
+    color: var(--text-dim);
+}
+.ot-empty .icon { font-size: 4rem; margin-bottom: 1.5rem; opacity: 0.35; animation: float 3s ease-in-out infinite; }
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+.ot-empty h2 {
+    color: #fff;
+    font-size: 1.3rem;
+    margin-bottom: 0.5rem;
+    background: none;
+    -webkit-text-fill-color: #fff;
+}
+.ot-empty p { max-width: 360px; font-size: 0.85rem; line-height: 1.7; }
+.ot-empty .hotkeys {
+    display: flex; gap: 1.2rem; margin-top: 1.5rem;
+    font-size: 0.75rem;
+}
+.ot-empty .hotkey {
+    display: flex; align-items: center; gap: 0.3rem;
+    color: var(--text-dim);
+}
+.ot-empty .hotkey kbd {
+    background: rgba(0,212,255,0.08);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.7rem;
+    color: var(--accent);
+    font-family: inherit;
+}
+
+/* 详情头部 */
+.ot-detail-header {
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.ot-detail-header .breadcrumb {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.ot-detail-header .breadcrumb span { color: var(--accent); }
+.ot-detail-header h1 {
+    font-size: 1.8rem;
+    margin-bottom: 0.4rem;
+}
+.ot-detail-header .desc {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+.ot-detail-header .meta-tags {
+    display: flex; gap: 0.5rem; margin-top: 0.8rem; flex-wrap: wrap;
+}
+.ot-tag {
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: rgba(0,212,255,0.04);
+}
+.ot-tag.domain-military { border-color: rgba(239,68,68,0.3); color: #ef4444; }
+.ot-tag.domain-civil    { border-color: rgba(34,197,94,0.3); color: #22c55e; }
+.ot-tag.domain-custom   { border-color: rgba(124,58,237,0.3); color: #7c3aed; }
+
+/* 详情区块 */
+.ot-section {
+    margin-bottom: 2rem;
+}
+.ot-section h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: var(--text);
+}
+.ot-section h3 .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--primary-glow);
+}
+
+/* 标签网格 */
+.ot-label-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.ot-label-chip {
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    background: rgba(0, 212, 255, 0.06);
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.ot-label-chip:hover {
+    border-color: var(--accent);
+    background: rgba(0, 212, 255, 0.12);
+    box-shadow: 0 0 12px var(--primary-glow);
+}
+.ot-label-chip .count {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    background: rgba(0,0,0,0.2);
+    padding: 0.05rem 0.35rem;
+    border-radius: 8px;
+}
+
+/* 关系类型列表 */
+.ot-rel-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.ot-rel-chip {
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    background: rgba(124, 58, 237, 0.08);
+    border: 1px solid rgba(124, 58, 237, 0.2);
+    font-size: 0.8rem;
+    color: #c4b5fd;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.ot-rel-chip::before {
+    content: "→";
+    font-size: 0.7rem;
+    opacity: 0.5;
+}
+
+/* JSON / properties 展示 */
+.ot-prop-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.ot-prop-table th {
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    background: rgba(0,212,255,0.05);
+    color: var(--accent);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+}
+.ot-prop-table td {
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid rgba(0,212,255,0.06);
+    color: var(--text);
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 0.78rem;
+}
+.ot-prop-table tr:hover td {
+    background: rgba(0,212,255,0.03);
+}
+
+/* 操作按钮行 */
+.ot-actions {
+    display: flex; gap: 0.6rem; margin-top: 1rem; flex-wrap: wrap;
+}
+.ot-actions .btn {
+    font-size: 0.82rem;
+    padding: 0.5rem 1rem;
+}
+.btn-accent {
+    background: rgba(0,212,255,0.15) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+.btn-accent:hover {
+    background: rgba(0,212,255,0.28) !important;
+}
+
+/* 加载和错误状态 */
+.ot-loading {
+    display: flex; align-items: center; justify-content: center;
+    padding: 3rem; color: var(--text-dim); gap: 0.6rem;
+}
+.ot-spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.ot-error {
+    padding: 1rem; margin: 1rem 0;
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 6px;
+    color: #f87171;
+    font-size: 0.82rem;
+}
+
+/* 移动弹窗 */
+.ot-move-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 300; display: none; align-items: center; justify-content: center; }
+.ot-move-overlay.open { display: flex; }
+.ot-move-box { background: var(--bg-mid); border: 1px solid var(--border); border-radius: 12px; padding: 1.8rem; width: 560px; max-width: 95vw; max-height: 80vh; display: flex; flex-direction: column; }
+.ot-move-box h4 { margin: 0 0 1rem; color: var(--accent); font-size: 1.05rem; }
+.ot-move-tree { flex: 1; overflow-y: auto; max-height: 55vh; padding: 0.5rem; }
+.ot-move-tree::-webkit-scrollbar { width: 6px; }
+.ot-move-tree::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 3px; }
+.ot-move-tree .mtree-item { padding: 0.45rem 0.6rem; cursor: pointer; border-radius: 4px; font-size: 0.9rem; color: var(--text); transition: all 0.12s; display: flex; align-items: center; gap: 0.4rem; margin-left: 0; }
+.ot-move-tree .mtree-item:hover { background: rgba(0,212,255,0.08); }
+.ot-move-tree .mtree-item.selected { background: rgba(0,212,255,0.14); color: var(--accent); }
+.ot-move-tree .mtree-item.current { opacity: 0.4; cursor: not-allowed; }
+.ot-move-tree .mtree-item .micon { width: 20px; text-align: center; font-size: 0.9rem; }
+.ot-move-tree .mtree-item.lvl0 { margin-left: 0; }
+.ot-move-tree .mtree-item.lvl1 { margin-left: 1.2rem; }
+.ot-move-tree .mtree-item.lvl2 { margin-left: 2.4rem; }
+.ot-move-tree .mtree-item.lvl3 { margin-left: 3.6rem; }
+.ot-move-box .btn-row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+.ot-move-box .btn-row .btn { font-size: 0.9rem; padding: 0.5rem 1.2rem; }
+
+/* 响应式: 窄屏时左侧折叠 */
+@media (max-width: 768px) {
+    .ot-sidebar { width: 240px; min-width: 240px; }
+    .ot-main { padding: 1.5rem; }
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+<div class="ot-layout">
+
+    <!-- ================================================================
+         左侧 — 树形目录
+         ================================================================ -->
+    <aside class="ot-sidebar">
+        <div class="ot-sidebar-header">
+            <div class="ot-sidebar-title">📋 模板目录</div>
+            <div class="ot-search">
+                <span class="search-icon">🔍</span>
+                <input id="treeSearch"
+                       type="text"
+                       placeholder="搜索模板..."
+                       oninput="filterTree()"
+                       autocomplete="off" />
+            </div>
+        </div>
+
+        <div class="ot-tree-wrap" id="treeWrap">
+            <ul class="ot-tree" id="treeRoot">
+                <!-- JS 动态渲染 -->
+            </ul>
+        </div>
+
+        <div class="ot-sidebar-footer">
+            <span class="ot-status-dot" id="neo4jDot"></span>
+            <span id="neo4jStatus">检查连接...</span>
+            <span style="margin-left:auto;" id="nodeCountSmall">—</span>
+        </div>
+    </aside>
+
+    <!-- ================================================================
+         右侧 — 详情区域
+         ================================================================ -->
+    <main class="ot-main" id="mainPanel">
+        <!-- 初始空状态 -->
+        <div class="ot-empty" id="emptyState">
+            <div class="icon">🗂️</div>
+            <h2>本体语义管理</h2>
+            <p>选择左侧模板，查看预定义的本体模型 Schema —— 包括节点标签、关系类型、属性和样例数据。支持军事、民用及自定义领域。</p>
+            <div class="tech-line" style="width:200px;"></div>
+            <div class="hotkeys">
+                <span class="hotkey"><kbd>↑↓</kbd> 切换模板</span>
+                <span class="hotkey"><kbd>Enter</kbd> 打开详情</span>
+                <span class="hotkey"><kbd>Esc</kbd> 清除选择</span>
+            </div>
+        </div>
+
+        <!-- 详情内容 (选中模板后动态填充) -->
+        <div id="detailContent" style="display:none;"></div>
+    </main>
+
+</div>
+{% endblock %}
+
+
+{% block extra_scripts %}
+<script>
+// ====================================================================
+// API — 本体模型 PostgreSQL CRUD
+// ====================================================================
+const API_MODEL = '/api/v1/ontology-models';
+const API_ATTR  = '/api/v1/ontology-attrs';
+const API_NEO4J = '/api/v1/ontology';
+
+// 本体类型 label 映射
+const MODEL_TYPE_LABEL = {M1:'对象',M2:'行为',M3:'规则',M4:'场景',M5:'主体',M6:'异常补偿',M7:'质量约束',ME:'事件',MT:'模板'};
+const MODEL_STATUS_LABEL = {'0':'启用中','1':'已停用'};
+const DATA_TYPE_LABEL = {'0':'字符串','1':'数字','2':'浮点数'};
+const REQ_FLAG_LABEL = {'0':'不必填','1':'必填'};
+const UNIQ_FLAG_LABEL = {'0':'否','1':'是'};
+
+async function apiGet(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+async function apiPost(url, body) {
+    const r = await fetch(url, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+async function apiPut(url, body) {
+    const r = await fetch(url, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+async function apiDel(url) {
+    const r = await fetch(url, {method:'DELETE'});
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+
+// ====================================================================
+// 全局状态
+// ====================================================================
+let treeData = [];           // 从 PG 加载的完整树 [{...node, depth, attributes}]
+let activeModel = null;      // 当前选中的模型节点
+let statsCache = null;       // { model_count, attr_count }
+
+// ====================================================================
+// 树渲染 — 从真实数据构建
+// ====================================================================
+const treeRoot = document.getElementById('treeRoot');
+
+function buildTreeHTML(nodes, filter, level) {
+    // nodes: 平铺的 CTE 树（含 depth），按 depth 排序
+    // 策略：找到 depth=0 的根节点，递归构建子树
+    if (!nodes || nodes.length === 0) return '';
+
+    const lvl = level || 0;
+    // 过滤当前层级的节点
+    const currentLevel = nodes.filter(n => (n.depth || 0) === lvl);
+
+    if (currentLevel.length === 0) return '';
+
+    // 对每个节点找到其子节点
+    let html = '<ul>';
+    currentLevel.forEach(node => {
+        // 搜索过滤
+        const name = node.ontol_name || '';
+        const desc = node.ontol_model_desc || '';
+        const typeLabel = MODEL_TYPE_LABEL[node.ontol_model_type] || node.ontol_model_type;
+        if (filter && !name.includes(filter) && !desc.includes(filter) && !typeLabel.includes(filter)) return;
+
+        const hasChildren = nodes.some(n => n.ontol_parent_id === node.id && n.delete_flag !== '1');
+        const childCount = nodes.filter(n => n.ontol_parent_id === node.id && n.delete_flag !== '1').length;
+        const attrCount = (node.attributes || []).length;
+
+        html += '<li>';
+        html += `<div class="ot-tree-item" data-mdl-id="${node.id}" data-depth="${node.depth||0}">`;
+        html += `<span class="ot-chevron ${hasChildren ? 'expanded' : 'leaf'}">▶</span>`;
+        html += `<span class="ot-icon ${hasChildren ? 'folder-open' : 'template'}">${hasChildren ? '📂' : '📄'}</span>`;
+        html += `<span class="ot-tree-label">${escHtml(name)}</span>`;
+        html += `<span class="ot-badge">${typeLabel}</span>`;
+        if (attrCount > 0) html += `<span class="ot-badge" style="background:rgba(124,58,237,0.12);">${attrCount}字段</span>`;
+        html += `<button class="tree-move-btn" onclick="event.stopPropagation();moveModel('${node.id}','${escHtml(name)}')" title="移动到其他父级">↗</button>`;
+        html += '</div>';
+
+        // 递归子节点
+        if (hasChildren) {
+            const childNodes = nodes.filter(n => n.ontol_parent_id === node.id && n.delete_flag !== '1');
+            // 递归收集子孙
+            const allDescendants = [];
+            function collectDesc(pid) {
+                nodes.filter(n => n.ontol_parent_id === pid && n.delete_flag !== '1').forEach(c => {
+                    allDescendants.push(c);
+                    collectDesc(c.id);
+                });
+            }
+            collectDesc(node.id);
+
+            // 重建深度（相对当前节点）
+            const subtree = childNodes.map(c => ({...c, depth: (c.depth||0) - lvl}));
+            // 递归渲染
+            html += renderSubtree(childNodes, nodes, lvl + 1, filter);
+        }
+        html += '</li>';
+    });
+    html += '</ul>';
+    return html;
+}
+
+function renderSubtree(children, allNodes, lvl, filter) {
+    if (!children || children.length === 0) return '';
+    let html = '<ul>';
+    children.forEach(node => {
+        const name = node.ontol_name || '';
+        const desc = node.ontol_model_desc || '';
+        const typeLabel = MODEL_TYPE_LABEL[node.ontol_model_type] || node.ontol_model_type;
+        if (filter && !name.includes(filter) && !desc.includes(filter) && !typeLabel.includes(filter)) return;
+
+        const hasChildren = allNodes.some(n => n.ontol_parent_id === node.id && n.delete_flag !== '1');
+        const attrCount = (node.attributes || []).length;
+
+        html += '<li>';
+        html += `<div class="ot-tree-item" data-mdl-id="${node.id}" data-depth="${lvl}">`;
+        html += `<span class="ot-chevron ${hasChildren ? 'expanded' : 'leaf'}">▶</span>`;
+        html += `<span class="ot-icon ${hasChildren ? 'folder-open' : 'template'}">${hasChildren ? '📂' : '📄'}</span>`;
+        html += `<span class="ot-tree-label">${escHtml(name)}</span>`;
+        html += `<span class="ot-badge">${typeLabel}</span>`;
+        if (attrCount > 0) html += `<span class="ot-badge" style="background:rgba(124,58,237,0.12);">${attrCount}字段</span>`;
+        html += `<button class="tree-move-btn" onclick="event.stopPropagation();moveModel('${node.id}','${escHtml(name)}')" title="移动到其他父级">↗</button>`;
+        html += '</div>';
+        if (hasChildren) {
+            const subs = allNodes.filter(n => n.ontol_parent_id === node.id && n.delete_flag !== '1');
+            html += renderSubtree(subs, allNodes, lvl + 1, filter);
+        }
+        html += '</li>';
+    });
+    html += '</ul>';
+    return html;
+}
+
+function escHtml(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderTree(filter) {
+    let html = buildTreeHTML(treeData, filter, 0);
+    if (!html) {
+        html = '<div style="padding:2rem;text-align:center;color:var(--text-dim);font-size:0.82rem;">暂无数据</div>';
+    }
+    treeRoot.innerHTML = html;
+
+    // 恢复 active 状态
+    if (activeModel) {
+        const el = treeRoot.querySelector(`[data-mdl-id="${activeModel.id}"]`);
+        if (el) el.classList.add('active');
+    }
+
+    // 绑定点击事件
+    treeRoot.querySelectorAll('.ot-tree-item').forEach(item => {
+        item.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const mdlId = this.dataset.mdlId;
+            const node = treeData.find(n => n.id === mdlId);
+            if (node) {
+                // 展开/折叠
+                const chevron = this.querySelector('.ot-chevron');
+                const li = this.parentElement;
+                const ul = li.querySelector('ul');
+                if (ul && !chevron.classList.contains('leaf')) {
+                    const isCollapsed = ul.style.maxHeight === '0px';
+                    if (isCollapsed) {
+                        ul.style.maxHeight = ul.scrollHeight + 'px';
+                        ul.style.opacity = '1';
+                        ul.classList.remove('collapsed');
+                        chevron.classList.add('expanded');
+                    } else {
+                        ul.style.maxHeight = '0px';
+                        ul.style.opacity = '0';
+                        ul.classList.add('collapsed');
+                        chevron.classList.remove('expanded');
+                    }
+                }
+                const fn = window._selectModel || selectModel;
+                fn(node);
+            }
+        });
+    });
+}
+
+// ====================================================================
+// 搜索
+// ====================================================================
+async function filterTree() {
+    const kw = document.getElementById('treeSearch').value.trim();
+    if (kw) {
+        // 走 API 搜索
+        try {
+            const results = await apiGet(`${API_MODEL}/search?keyword=${encodeURIComponent(kw)}&limit=50`);
+            // 把搜索结果作为平铺树展示
+            treeData = results.map(r => ({...r, depth:0, attributes:[]}));
+            renderTree(null);
+        } catch(e) {
+            // 本地过滤
+            renderTree(kw);
+        }
+    } else {
+        await reloadTree();
+    }
+}
+
+// ====================================================================
+// 选择模型 & 显示详情
+// ====================================================================
+async function selectModel(node) {
+    activeModel = node;
+
+    // 更新 active 样式
+    treeRoot.querySelectorAll('.ot-tree-item').forEach(el => el.classList.remove('active'));
+    const activeEl = treeRoot.querySelector(`[data-mdl-id="${node.id}"]`);
+    if (activeEl) activeEl.classList.add('active');
+
+    // 显示详情
+    document.getElementById('emptyState').style.display = 'none';
+    const detailEl = document.getElementById('detailContent');
+    detailEl.style.display = 'block';
+    detailEl.innerHTML = '<div class="ot-loading"><div class="ot-spinner"></div>加载详情...</div>';
+    document.getElementById('mainPanel').scrollTop = 0;
+
+    try {
+        // 获取完整的模型+属性
+        const model = await apiGet(`${API_MODEL}/${encodeURIComponent(node.id)}?with_attrs=true`);
+        renderDetail(model);
+    } catch(e) {
+        // 用已有数据渲染
+        renderDetail(node);
+    }
+}
+
+function renderDetail(model) {
+    const detailEl = document.getElementById('detailContent');
+    const typeLabel = MODEL_TYPE_LABEL[model.ontol_model_type] || model.ontol_model_type || '—';
+    const statusLabel = MODEL_STATUS_LABEL[model.ontol_model_status] || model.ontol_model_status;
+    const attrs = model.attributes || [];
+    const presetAttrs = attrs.filter(a => a.attr_relation_flag === '1');
+    const customAttrs = attrs.filter(a => a.attr_relation_flag !== '1');
+
+    function attrTable(list) {
+        if (list.length === 0) return '<p style="color:var(--text-dim);font-size:0.82rem;">无</p>';
+        const rows = list.map(a => `
+            <tr>
+                <td><code>${escHtml(a.attr_code)}</code></td>
+                <td>${escHtml(a.attr_name)}</td>
+                <td>${DATA_TYPE_LABEL[a.attr_data_type]||a.attr_data_type}</td>
+                <td>${a.attr_length||'—'}</td>
+                <td>${REQ_FLAG_LABEL[a.attr_required]||a.attr_required}</td>
+                <td>${UNIQ_FLAG_LABEL[a.attr_is_only]||'—'}</td>
+                <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;" title="${escHtml(a.attr_default_value||'')}">${escHtml(a.attr_default_value||'—')}</td>
+                <td>
+                    <button onclick="editAttr('${a.id}')" style="font-size:0.65rem;padding:0.1rem 0.4rem;" title="编辑">✏</button>
+                    <button onclick="moveAttr('${a.id}','${escHtml(a.attr_name)}','${escHtml(model.id)}')" style="font-size:0.65rem;padding:0.1rem 0.4rem;border-color:#f59e0b;color:#f59e0b;" title="移动到其他模型">📦</button>
+                    <button onclick="deleteAttr('${a.id}','${escHtml(a.attr_name)}')" style="font-size:0.65rem;padding:0.1rem 0.4rem;border-color:#ef4444;color:#ef4444;" title="删除">✕</button>
+                </td>
+            </tr>
+        `).join('');
+        return `<table class="ot-prop-table">
+            <thead><tr><th>编码</th><th>名称</th><th>类型</th><th>长度</th><th>必填</th><th>唯一</th><th>默认值</th><th>操作</th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+    }
+
+    detailEl.innerHTML = `
+        <div class="ot-detail-header">
+            <div class="breadcrumb">
+                <a href="#" onclick="resetSelection();return false;">本体模型</a> /
+                <span>${typeLabel}</span> /
+                <span>${escHtml(model.ontol_name)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.8rem;">
+                <h1 style="margin-bottom:0;">${escHtml(model.ontol_name)}</h1>
+                <span class="ot-tag" style="font-size:0.72rem;">${typeLabel}</span>
+                <span class="ot-tag" style="font-size:0.72rem;color:${model.ontol_model_status==='0'?'#22c55e':'#ef4444'};">${statusLabel}</span>
+            </div>
+            <p class="desc">${escHtml(model.ontol_model_desc || '暂无描述')}</p>
+            <div class="meta-tags">
+                <span class="ot-tag">ID: ${escHtml(model.id)}</span>
+                ${model.ontol_parent_id ? `<span class="ot-tag">父级: ${escHtml(model.ontol_parent_id)}</span>` : '<span class="ot-tag" style="color:#f59e0b;">根节点</span>'}
+                <span class="ot-tag">${attrs.length} 个字段</span>
+                <span class="ot-tag">创建: ${(model.create_time||'').substring(0,10)}</span>
+                <span class="ot-tag">更新: ${(model.update_time||'').substring(0,10)}</span>
+            </div>
+            <div class="ot-actions" style="margin-top:1.2rem;">
+                <button class="btn btn-accent" onclick="showCreateAttrForm('${model.id}')">＋ 添加字段</button>
+                <button class="btn" onclick="showEditModelForm('${model.id}')">✏ 编辑模型</button>
+                <button class="btn" onclick="showCreateChildForm('${model.id}')">＋ 新建子模型</button>
+                <button class="btn" style="border-color:#ef4444;color:#ef4444;" onclick="deleteModelConfirm('${model.id}','${escHtml(model.ontol_name)}')">🗑 删除</button>
+            </div>
+        </div>
+
+        <div class="ot-section">
+            <h3><span class="dot"></span> 预置字段 (${presetAttrs.length})</h3>
+            ${attrTable(presetAttrs)}
+        </div>
+
+        <div class="ot-section">
+            <h3><span class="dot"></span> 自定义字段 (${customAttrs.length})</h3>
+            ${attrTable(customAttrs)}
+        </div>
+    `;
+}
+
+// ====================================================================
+// CRUD 操作
+// ====================================================================
+
+// ── 创建子模型 ──
+function showCreateChildForm(parentId, defaultType) {
+    const detailEl = document.getElementById('detailContent');
+    const dt = defaultType || 'M1';
+    const typeOpts = Object.entries(MODEL_TYPE_LABEL).map(([k,v]) => `<option value="${k}" ${k===dt?'selected':''}>${k} — ${v}</option>`).join('');
+    detailEl.innerHTML = `
+        <div class="ot-detail-header">
+            <div class="breadcrumb"><a href="#" onclick="selectModel(activeModel);return false;">← 返回</a></div>
+            <h1>新建子模型</h1>
+            <p class="desc">在 <b>${escHtml(activeModel?.ontol_name||parentId)}</b> 下创建新的本体模型</p>
+        </div>
+        <div style="max-width:500px;">
+            <label>模型ID <span style="color:#ef4444;">*</span></label>
+            <input id="f-id" placeholder="如 M_NAVAL" style="width:100%;margin-bottom:0.6rem;" />
+            <label>名称 <span style="color:#ef4444;">*</span></label>
+            <input id="f-name" placeholder="本体名称" style="width:100%;margin-bottom:0.6rem;" />
+            <label>类型 <span style="color:#ef4444;">*</span></label>
+            <select id="f-type" style="width:100%;margin-bottom:0.6rem;">${typeOpts}</select>
+            <label>描述</label>
+            <input id="f-desc" placeholder="本体描述" style="width:100%;margin-bottom:0.6rem;" />
+            <label>状态</label>
+            <select id="f-status" style="width:100%;margin-bottom:1rem;">
+                <option value="0">启用中</option><option value="1">已停用</option>
+            </select>
+            <div class="ot-actions">
+                <button class="btn btn-accent" onclick="createChildModel('${parentId}')">创建</button>
+                <button class="btn" onclick="selectModel(activeModel);return false;">取消</button>
+            </div>
+        </div>`;
+}
+
+async function createChildModel(parentId) {
+    const id = document.getElementById('f-id')?.value?.trim();
+    const name = document.getElementById('f-name')?.value?.trim();
+    const type = document.getElementById('f-type')?.value;
+    const desc = document.getElementById('f-desc')?.value?.trim();
+    const status = document.getElementById('f-status')?.value;
+    if (!id || !name) { alert('请填写模型ID和名称'); return; }
+    try {
+        await apiPost(API_MODEL, {
+            id, ontol_name: name, ontol_model_type: type,
+            ontol_parent_id: parentId,
+            ontol_model_status: status,
+            ontol_model_desc: desc || null,
+            create_id: 'admin',
+        });
+        await reloadTree();
+        const node = treeData.find(n => n.id === id);
+        if (node) selectModel(node);
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+// ── 编辑模型 ──
+function showEditModelForm(modelId) {
+    const model = treeData.find(n => n.id === modelId) || activeModel;
+    if (!model) return;
+    const typeOpts = Object.entries(MODEL_TYPE_LABEL).map(([k,v]) => `<option value="${k}" ${k===model.ontol_model_type?'selected':''}>${k} — ${v}</option>`).join('');
+    const detailEl = document.getElementById('detailContent');
+    detailEl.innerHTML = `
+        <div class="ot-detail-header">
+            <div class="breadcrumb"><a href="#" onclick="selectModel(activeModel);return false;">← 返回</a></div>
+            <h1>编辑模型</h1>
+        </div>
+        <div style="max-width:500px;">
+            <label>名称</label>
+            <input id="f-name" value="${escHtml(model.ontol_name||'')}" style="width:100%;margin-bottom:0.6rem;" />
+            <label>类型</label>
+            <select id="f-type" style="width:100%;margin-bottom:0.6rem;">${typeOpts}</select>
+            <label>父级ID</label>
+            <input id="f-parent" value="${escHtml(model.ontol_parent_id||'')}" placeholder="留空=根节点" style="width:100%;margin-bottom:0.6rem;" />
+            <label>描述</label>
+            <input id="f-desc" value="${escHtml(model.ontol_model_desc||'')}" style="width:100%;margin-bottom:0.6rem;" />
+            <label>状态</label>
+            <select id="f-status" style="width:100%;margin-bottom:1rem;">
+                <option value="0" ${model.ontol_model_status==='0'?'selected':''}>启用中</option>
+                <option value="1" ${model.ontol_model_status==='1'?'selected':''}>已停用</option>
+            </select>
+            <div class="ot-actions">
+                <button class="btn btn-accent" onclick="saveEditModel('${modelId}')">保存</button>
+                <button class="btn" onclick="selectModel(activeModel);return false;">取消</button>
+            </div>
+        </div>`;
+}
+
+async function saveEditModel(modelId) {
+    const data = {};
+    const name = document.getElementById('f-name')?.value?.trim();
+    if (name) data.ontol_name = name;
+    data.ontol_model_type = document.getElementById('f-type')?.value;
+    data.ontol_parent_id = document.getElementById('f-parent')?.value?.trim() || null;
+    data.ontol_model_desc = document.getElementById('f-desc')?.value?.trim() || null;
+    data.ontol_model_status = document.getElementById('f-status')?.value;
+    data.update_id = 'admin';
+    try {
+        await apiPut(`${API_MODEL}/${encodeURIComponent(modelId)}`, data);
+        await reloadTree();
+        const node = treeData.find(n => n.id === modelId);
+        if (node) selectModel(node);
+    } catch(e) { alert('保存失败: ' + e.message); }
+}
+
+// ── 删除模型 ──
+function deleteModelConfirm(modelId, name) {
+    if (!confirm(`确定删除模型 "${name}" (${modelId}) 吗？\n默认逻辑删除，可通过 API 物理删除。`)) return;
+    apiDel(`${API_MODEL}/${encodeURIComponent(modelId)}?soft=true`)
+        .then(async () => {
+            if (activeModel?.id === modelId) resetSelection();
+            await reloadTree();
+        })
+        .catch(e => alert('删除失败: ' + e.message));
+}
+
+// ── 添加字段 ──
+function showCreateAttrForm(modelId) {
+    const detailEl = document.getElementById('detailContent');
+    detailEl.innerHTML = `
+        <div class="ot-detail-header">
+            <div class="breadcrumb"><a href="#" onclick="selectModel(activeModel);return false;">← 返回</a></div>
+            <h1>添加字段</h1>
+            <p class="desc">为 <b>${escHtml(activeModel?.ontol_name||modelId)}</b> 添加自定义属性字段</p>
+        </div>
+        <div style="max-width:500px;">
+            <label>字段ID <span style="color:#ef4444;">*</span></label>
+            <input id="a-id" placeholder="如 ATTR_M1_RANGE" style="width:100%;margin-bottom:0.6rem;" />
+            <label>字段名称 <span style="color:#ef4444;">*</span></label>
+            <input id="a-name" placeholder="如 作战半径" style="width:100%;margin-bottom:0.6rem;" />
+            <label>字段编码 <span style="color:#ef4444;">*</span></label>
+            <input id="a-code" placeholder="如 range_km" style="width:100%;margin-bottom:0.6rem;" />
+            <div style="display:flex;gap:0.5rem;">
+                <div style="flex:1;"><label>数据类型</label>
+                    <select id="a-dtype" style="width:100%;margin-bottom:0.6rem;">
+                        <option value="0">字符串</option><option value="1">数字</option><option value="2">浮点数</option>
+                    </select></div>
+                <div style="flex:1;"><label>长度</label><input id="a-len" placeholder="如 100" style="width:100%;margin-bottom:0.6rem;" /></div>
+                <div style="flex:1;"><label>小数位</label><input id="a-digit" placeholder="如 2" style="width:100%;margin-bottom:0.6rem;" /></div>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+                <div style="flex:1;"><label>是否必填</label>
+                    <select id="a-req" style="width:100%;margin-bottom:0.6rem;"><option value="0">否</option><option value="1">是</option></select></div>
+                <div style="flex:1;"><label>是否唯一</label>
+                    <select id="a-uniq" style="width:100%;margin-bottom:0.6rem;"><option value="0">否</option><option value="1">是</option></select></div>
+            </div>
+            <label>默认值</label>
+            <input id="a-defval" placeholder="默认值/SWRL表达式" style="width:100%;margin-bottom:0.6rem;" />
+            <label>字段描述</label>
+            <input id="a-desc" placeholder="字段用途说明" style="width:100%;margin-bottom:1rem;" />
+            <div class="ot-actions">
+                <button class="btn btn-accent" onclick="createAttr('${modelId}')">创建</button>
+                <button class="btn" onclick="selectModel(activeModel);return false;">取消</button>
+            </div>
+        </div>`;
+}
+
+async function createAttr(modelId) {
+    const id = document.getElementById('a-id')?.value?.trim();
+    const name = document.getElementById('a-name')?.value?.trim();
+    const code = document.getElementById('a-code')?.value?.trim();
+    if (!id || !name || !code) { alert('请填写字段ID、名称和编码'); return; }
+    const data = {
+        id, ontol_model_id: modelId, attr_name: name, attr_code: code,
+        attr_data_type: document.getElementById('a-dtype')?.value||'0',
+        attr_length: document.getElementById('a-len')?.value?.trim()||null,
+        attr_digit: document.getElementById('a-digit')?.value?.trim()||null,
+        attr_required: document.getElementById('a-req')?.value||'0',
+        attr_is_only: document.getElementById('a-uniq')?.value||'0',
+        attr_default_value: document.getElementById('a-defval')?.value?.trim()||null,
+        attr_desc: document.getElementById('a-desc')?.value?.trim()||null,
+        attr_relation_flag: '0',
+        create_id: 'admin',
+    };
+    try {
+        await apiPost(`${API_MODEL}/${encodeURIComponent(modelId)}/attrs`, data);
+        if (activeModel?.id === modelId) selectModel(activeModel);
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+// ── 编辑字段（表单） ──
+async function editAttr(attrId) {
+    if (!activeModel) return;
+    // 重新拉属性详情
+    let attr;
+    try {
+        attr = await apiGet(`${API_ATTR}/${encodeURIComponent(attrId)}`);
+    } catch(e) { alert('获取字段信息失败: ' + e.message); return; }
+
+    const detailEl = document.getElementById('detailContent');
+    detailEl.innerHTML = `
+        <div class="ot-detail-header">
+            <div class="breadcrumb">
+                <a href="#" onclick="selectModel(activeModel);return false;">← 返回模型</a> /
+                <span>编辑字段</span> /
+                <span>${escHtml(attr.attr_name)}</span>
+            </div>
+            <h1>编辑字段</h1>
+            <p class="desc">所属模型: <b>${escHtml(activeModel.ontol_name)}</b> (${activeModel.id})</p>
+        </div>
+        <div style="max-width:560px;">
+            <label>字段名称</label>
+            <input id="ea-name" value="${escHtml(attr.attr_name||'')}" style="width:100%;margin-bottom:0.6rem;" />
+            <label>字段编码</label>
+            <input id="ea-code" value="${escHtml(attr.attr_code||'')}" style="width:100%;margin-bottom:0.6rem;" />
+            <div style="display:flex;gap:0.5rem;">
+                <div style="flex:1;"><label>数据类型</label>
+                    <select id="ea-dtype" style="width:100%;margin-bottom:0.6rem;">
+                        <option value="0" ${attr.attr_data_type==='0'?'selected':''}>0 — 字符串</option>
+                        <option value="1" ${attr.attr_data_type==='1'?'selected':''}>1 — 数字</option>
+                        <option value="2" ${attr.attr_data_type==='2'?'selected':''}>2 — 浮点数</option>
+                    </select></div>
+                <div style="flex:1;"><label>长度</label>
+                    <input id="ea-len" value="${escHtml(attr.attr_length||'')}" style="width:100%;margin-bottom:0.6rem;" /></div>
+                <div style="flex:1;"><label>小数位</label>
+                    <input id="ea-digit" value="${escHtml(attr.attr_digit||'')}" style="width:100%;margin-bottom:0.6rem;" /></div>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+                <div style="flex:1;"><label>是否必填</label>
+                    <select id="ea-req" style="width:100%;margin-bottom:0.6rem;">
+                        <option value="0" ${attr.attr_required==='0'?'selected':''}>0 — 否</option>
+                        <option value="1" ${attr.attr_required==='1'?'selected':''}>1 — 是</option>
+                    </select></div>
+                <div style="flex:1;"><label>是否唯一</label>
+                    <select id="ea-uniq" style="width:100%;margin-bottom:0.6rem;">
+                        <option value="0" ${attr.attr_is_only==='0'?'selected':''}>0 — 否</option>
+                        <option value="1" ${attr.attr_is_only==='1'?'selected':''}>1 — 是</option>
+                    </select></div>
+            </div>
+            <label>级联字段</label>
+            <input id="ea-cascade" value="${escHtml(attr.attr_cascade_colum||'')}" style="width:100%;margin-bottom:0.6rem;" />
+            <div style="display:flex;gap:0.5rem;">
+                <div style="flex:1;"><label>关联类型</label>
+                    <select id="ea-dsflag" style="width:100%;margin-bottom:0.6rem;">
+                        <option value="">— 无 —</option>
+                        <option value="0" ${attr.attr_data_source_flag==='0'?'selected':''}>0 — 数据字典</option>
+                        <option value="1" ${attr.attr_data_source_flag==='1'?'selected':''}>1 — 主数据模型</option>
+                        <option value="2" ${attr.attr_data_source_flag==='2'?'selected':''}>2 — 系统表单</option>
+                    </select></div>
+                <div style="flex:1;"><label>关联ID</label>
+                    <input id="ea-dsrc" value="${escHtml(attr.attr_data_source||'')}" style="width:100%;margin-bottom:0.6rem;" /></div>
+            </div>
+            <label>默认值（SWRL）</label>
+            <textarea id="ea-defval" rows="2" style="width:100%;margin-bottom:0.6rem;">${escHtml(attr.attr_default_value||'')}</textarea>
+            <label>字段描述</label>
+            <input id="ea-desc" value="${escHtml(attr.attr_desc||'')}" style="width:100%;margin-bottom:1rem;" />
+            <label>预置字段</label>
+            <select id="ea-relation" style="width:100%;margin-bottom:1rem;">
+                <option value="0" ${attr.attr_relation_flag==='0'?'selected':''}>0 — 自定义字段</option>
+                <option value="1" ${attr.attr_relation_flag==='1'?'selected':''}>1 — 预置字段</option>
+            </select>
+            <div class="ot-actions">
+                <button class="btn btn-accent" onclick="saveEditAttr('${attrId}')">💾 保存</button>
+                <button class="btn" onclick="selectModel(activeModel)">取消</button>
+                <button class="btn" style="border-color:#ef4444;color:#ef4444;margin-left:auto;" onclick="deleteAttr('${attrId}','${escHtml(attr.attr_name)}')">🗑 删除</button>
+            </div>
+        </div>`;
+    document.getElementById('mainPanel').scrollTop = 0;
+}
+
+async function saveEditAttr(attrId) {
+    const data = {};
+    const name = document.getElementById('ea-name')?.value?.trim();
+    if (name) data.attr_name = name;
+    const code = document.getElementById('ea-code')?.value?.trim();
+    if (code) data.attr_code = code;
+    data.attr_data_type = document.getElementById('ea-dtype')?.value;
+    data.attr_length = document.getElementById('ea-len')?.value?.trim() || null;
+    data.attr_digit = document.getElementById('ea-digit')?.value?.trim() || null;
+    data.attr_required = document.getElementById('ea-req')?.value;
+    data.attr_is_only = document.getElementById('ea-uniq')?.value;
+    data.attr_cascade_colum = document.getElementById('ea-cascade')?.value?.trim() || null;
+    data.attr_data_source_flag = document.getElementById('ea-dsflag')?.value || null;
+    data.attr_data_source = document.getElementById('ea-dsrc')?.value?.trim() || null;
+    data.attr_default_value = document.getElementById('ea-defval')?.value?.trim() || null;
+    data.attr_desc = document.getElementById('ea-desc')?.value?.trim() || null;
+    data.attr_relation_flag = document.getElementById('ea-relation')?.value;
+    try {
+        await apiPut(`${API_ATTR}/${encodeURIComponent(attrId)}`, data);
+        if (activeModel) selectModel(activeModel);
+    } catch(e) { alert('保存失败: ' + e.message); }
+}
+
+async function deleteAttr(attrId, name) {
+    if (!confirm(`确定删除字段 "${name}" (${attrId}) 吗？`)) return;
+    try {
+        await apiDel(`${API_ATTR}/${encodeURIComponent(attrId)}?soft=true`);
+        if (activeModel) selectModel(activeModel);
+    } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// ── 移动属性到其他模型 ──
+function moveAttr(attrId, attrName, fromModelId) {
+    // 收集中所有其他模型作为目标
+    const targets = treeData.filter(n => n.id !== fromModelId && n.delete_flag !== '1');
+    const options = targets.map(n => {
+        const type = MODEL_TYPE_LABEL[n.ontol_model_type] || n.ontol_model_type;
+        return `<option value="${n.id}">${escHtml(n.ontol_name)} (${type} · ${n.id})</option>`;
+    }).join('');
+
+    if (!options) { alert('没有其他模型可以移入'); return; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'ot-move-overlay open';
+    overlay.innerHTML = `
+        <div class="ot-move-box">
+            <h4>📦 移动字段: "${escHtml(attrName)}"</h4>
+            <label style="font-size:0.75rem;color:var(--text-dim);">目标模型</label>
+            <select id="moveTarget" size="8">${options}</select>
+            <div class="btn-row">
+                <button class="btn" onclick="this.closest('.ot-move-overlay').remove()">取消</button>
+                <button class="btn btn-accent" id="confirmMoveBtn">移动</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    // 绑点遮罩点击关闭
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    document.getElementById('confirmMoveBtn').addEventListener('click', async () => {
+        const sel = document.getElementById('moveTarget');
+        const targetId = sel?.value;
+        if (!targetId) return;
+        try {
+            await apiPut(`${API_ATTR}/${encodeURIComponent(attrId)}`, { ontol_model_id: targetId });
+            overlay.remove();
+            showToast(`字段已移动到目标模型`, 'success');
+            if (activeModel) selectModel(activeModel);
+        } catch(e) { alert('移动失败: ' + e.message); }
+    });
+}
+
+// ── 移动模型到其他父级 ──
+async function moveModel(modelId, modelName) {
+    let fullTree;
+    try { fullTree = await apiGet(API_MODEL + '/tree'); } catch(e) { fullTree = treeData; }
+
+    const childIds = new Set();
+    function collectDescendants(pid) {
+        fullTree.filter(n => n.ontol_parent_id === pid && n.delete_flag !== '1').forEach(c => {
+            childIds.add(c.id); collectDescendants(c.id);
+        });
+    }
+    childIds.add(modelId);
+    collectDescendants(modelId);
+
+    let selId = '';
+
+    function treeHtml(pid, lvl) {
+        const kids = fullTree.filter(n => n.ontol_parent_id === (pid || null) && n.delete_flag !== '1');
+        if (kids.length === 0) return '';
+        return kids.map(n => {
+            const blocked = childIds.has(n.id);
+            const cls = 'mtree-item lvl' + Math.min(lvl, 3) + (blocked ? ' current' : '');
+            return `<div class="${cls}" data-id="${n.id}" ${blocked ? 'title="不能移到自身或其子孙"' : ''}>
+                <span class="micon">${blocked ? '🚫' : '📄'}</span>
+                <span>${escHtml(n.ontol_name)} <span style="color:var(--text-dim);font-size:0.7rem;">${MODEL_TYPE_LABEL[n.ontol_model_type]||n.ontol_model_type}</span></span>
+            </div>` + treeHtml(n.id, lvl + 1);
+        }).join('');
+    }
+
+    const t = treeHtml(null, 0);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'ot-move-overlay open';
+    overlay.innerHTML = `<div class="ot-move-box">
+        <h4>↗ 移动 "${escHtml(modelName)}" 到...</h4>
+        <div class="ot-move-tree" id="moveTreeWrap">
+            <div class="mtree-item lvl0" data-id=""><span class="micon">📁</span><span><b>根节点</b> <span style="color:var(--text-dim);font-size:0.7rem;">(无父级)</span></span></div>
+            ${t}
+        </div>
+        <div class="btn-row">
+            <button class="btn" onclick="this.closest('.ot-move-overlay').remove()">取消</button>
+            <button class="btn btn-accent" id="confirmMoveModelBtn">移动</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    function refresh() {
+        overlay.querySelectorAll('.mtree-item:not(.current)').forEach(el => el.classList.remove('selected'));
+        if (selId !== undefined) {
+            const s = overlay.querySelector(`.mtree-item[data-id="${selId}"]:not(.current)`);
+            if (s) s.classList.add('selected');
+        }
+    }
+
+    overlay.querySelectorAll('.mtree-item:not(.current)').forEach(el => {
+        el.addEventListener('click', () => { selId = el.dataset.id; refresh(); });
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    document.getElementById('confirmMoveModelBtn').addEventListener('click', async () => {
+        if (selId === undefined) { alert('请先选择目标'); return; }
+        try {
+            await apiPut(API_MODEL + '/' + encodeURIComponent(modelId), { ontol_parent_id: selId || null, update_id: 'admin' });
+            overlay.remove();
+            await reloadTree();
+        } catch(e) { alert('移动失败: ' + e.message); }
+    });
+}
+
+// ── Toast ──
+function showToast(msg, type) {
+    const t = document.createElement('div');
+    t.style.cssText = `position:fixed;top:80px;right:1.5rem;padding:0.6rem 1rem;border-radius:8px;font-size:0.82rem;z-index:999;`;
+    t.textContent = msg;
+    t.style.background = type === 'success' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)';
+    t.style.border = `1px solid ${type === 'success' ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'}`;
+    t.style.color = type === 'success' ? '#22c55e' : '#ef4444';
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; }, 2500);
+    setTimeout(() => t.remove(), 2800);
+}
+
+// ====================================================================
+// 工具函数
+// ====================================================================
+function resetSelection() {
+    activeModel = null;
+    treeRoot.querySelectorAll('.ot-tree-item').forEach(el => el.classList.remove('active'));
+    document.getElementById('detailContent').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'flex';
+    document.getElementById('mainPanel').scrollTop = 0;
+}
+
+async function reloadTree() {
+    try {
+        const data = await apiGet(API_MODEL + '/tree?with_attrs=true');
+        treeData = data;
+        renderTree(null);
+        updateFooter(data);
+    } catch(e) {
+        console.error('加载树失败:', e);
+        treeRoot.innerHTML = `<div class="ot-error">⚠️ 加载失败: ${escHtml(e.message)}</div>`;
+    }
+}
+
+function updateFooter(tree) {
+    try {
+        const stats = apiGet(API_MODEL + '/stats').then(s => {
+            statsCache = s;
+            document.getElementById('neo4jDot').classList.remove('offline');
+            document.getElementById('neo4jStatus').textContent = `数据库已连接 · ${s.model_count||0} 模型`;
+            document.getElementById('nodeCountSmall').textContent = `${s.attr_count||0} 字段`;
+        }).catch(() => {
+            document.getElementById('neo4jStatus').textContent = `数据库已连接 · ${tree?.length||0} 节点`;
+            document.getElementById('nodeCountSmall').textContent = '—';
+        });
+    } catch(_) {}
+}
+
+// ====================================================================
+// 键盘导航
+// ====================================================================
+document.addEventListener('keydown', (e) => {
+    if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'SELECT') return;
+
+    if (e.key === 'Escape') resetSelection();
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const items = [...treeRoot.querySelectorAll('.ot-tree-item[data-mdl-id]')];
+        if (!items.length) return;
+        const curIdx = items.findIndex(el => el.classList.contains('active'));
+        let nextIdx;
+        if (curIdx < 0) nextIdx = e.key === 'ArrowDown' ? 0 : items.length - 1;
+        else {
+            const d = e.key === 'ArrowDown' ? 1 : -1;
+            nextIdx = (curIdx + d + items.length) % items.length;
+        }
+        const node = treeData.find(n => n.id === items[nextIdx].dataset.mdlId);
+        if (node) selectModel(node);
+        items[nextIdx].scrollIntoView({block:'nearest',behavior:'smooth'});
+    }
+
+    // Ctrl+N 新建根模型
+    if (e.key === 'n' && e.ctrlKey) {
+        e.preventDefault();
+        showCreateRootForm();
+    }
+});
+
+// ── 创建根模型 ──
+function showCreateRootForm() {
+    document.getElementById('emptyState').style.display = 'none';
+    const detailEl = document.getElementById('detailContent');
+    detailEl.style.display = 'block';
+    const typeOpts = Object.entries(MODEL_TYPE_LABEL).map(([k,v]) => `<option value="${k}">${k} — ${v}</option>`).join('');
+    detailEl.innerHTML = `
+        <div class="ot-detail-header"><h1>新建根模型</h1><p class="desc">创建顶级本体模型（无父级）</p></div>
+        <div style="max-width:500px;">
+            <label>模型ID <span style="color:#ef4444;">*</span></label>
+            <input id="f-id" placeholder="如 M_NEW" style="width:100%;margin-bottom:0.6rem;" />
+            <label>名称 <span style="color:#ef4444;">*</span></label>
+            <input id="f-name" placeholder="本体名称" style="width:100%;margin-bottom:0.6rem;" />
+            <label>类型 <span style="color:#ef4444;">*</span></label>
+            <select id="f-type" style="width:100%;margin-bottom:0.6rem;">${typeOpts}</select>
+            <label>描述</label><input id="f-desc" placeholder="本体描述" style="width:100%;margin-bottom:1rem;" />
+            <div class="ot-actions">
+                <button class="btn btn-accent" onclick="createRootModel()">创建</button>
+                <button class="btn" onclick="resetSelection()">取消</button>
+            </div>
+        </div>`;
+    document.getElementById('mainPanel').scrollTop = 0;
+}
+
+async function createRootModel() {
+    const id = document.getElementById('f-id')?.value?.trim();
+    const name = document.getElementById('f-name')?.value?.trim();
+    const type = document.getElementById('f-type')?.value;
+    if (!id || !name) { alert('请填写模型ID和名称'); return; }
+    try {
+        await apiPost(API_MODEL, {
+            id, ontol_name: name, ontol_model_type: type,
+            ontol_parent_id: null,
+            ontol_model_desc: document.getElementById('f-desc')?.value?.trim()||null,
+            create_id: 'admin',
+        });
+        await reloadTree();
+        const node = treeData.find(n => n.id === id);
+        if (node) selectModel(node);
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+// ====================================================================
+// 降级：Neo4j 数据 → PG 树形结构
+// ====================================================================
+
+// 预置种子树（PG migration 里的数据，数据库离线时使用）
+const SEED_TREE = [
+    {id:'M_ROOT',          ontol_parent_id:null,        ontol_name:'本体根节点', ontol_model_type:'M1', ontol_model_status:'0', ontol_model_desc:'所有本体模型的根节点', depth:0, delete_flag:'0'},
+    {id:'M_ENTITY',        ontol_parent_id:'M_ROOT',    ontol_name:'实体',       ontol_model_type:'M1', ontol_model_status:'0', ontol_model_desc:'可独立存在的物理或逻辑实体', depth:1, delete_flag:'0'},
+    {id:'M_BEHAVIOR',      ontol_parent_id:'M_ROOT',    ontol_name:'行为',       ontol_model_type:'M2', ontol_model_status:'0', ontol_model_desc:'实体可执行的动作或操作', depth:1, delete_flag:'0'},
+    {id:'M_RULE',          ontol_parent_id:'M_ROOT',    ontol_name:'规则',       ontol_model_type:'M3', ontol_model_status:'0', ontol_model_desc:'约束、推理规则与业务逻辑', depth:1, delete_flag:'0'},
+    {id:'M_SCENE',         ontol_parent_id:'M_ROOT',    ontol_name:'场景',       ontol_model_type:'M4', ontol_model_status:'0', ontol_model_desc:'实体行为发生的时空上下文', depth:1, delete_flag:'0'},
+    {id:'M_AGENT',         ontol_parent_id:'M_ROOT',    ontol_name:'主体',       ontol_model_type:'M5', ontol_model_status:'0', ontol_model_desc:'具有自主决策能力的智能体', depth:1, delete_flag:'0'},
+    {id:'M_EXCEPTION',     ontol_parent_id:'M_ROOT',    ontol_name:'异常补偿',   ontol_model_type:'M6', ontol_model_status:'0', ontol_model_desc:'异常处理与补偿回滚机制', depth:1, delete_flag:'0'},
+    {id:'M_QUALITY',       ontol_parent_id:'M_ROOT',    ontol_name:'质量约束',   ontol_model_type:'M7', ontol_model_status:'0', ontol_model_desc:'数据质量校验约束与度量', depth:1, delete_flag:'0'},
+    {id:'M_EVENT',         ontol_parent_id:'M_ROOT',    ontol_name:'事件',       ontol_model_type:'ME', ontol_model_status:'0', ontol_model_desc:'本体中发生的状态变化事件', depth:1, delete_flag:'0'},
+    {id:'M_TEMPLATE',      ontol_parent_id:'M_ROOT',    ontol_name:'模板',       ontol_model_type:'MT', ontol_model_status:'0', ontol_model_desc:'可复用的本体模板定义', depth:1, delete_flag:'0'},
+    {id:'M_BASE_ONTOLOGY', ontol_parent_id:'M_ROOT',    ontol_name:'基本本体',   ontol_model_type:'M1', ontol_model_status:'0', ontol_model_desc:'基础本体模型，定义最通用的实体属性和关系', depth:1, delete_flag:'0'},
+];
+
+// Neo4j 降级：从 Neo4j Schema + 预置种子构建树
+async function loadFromNeo4j() {
+    try {
+        const schema = await apiGet(API_NEO4J + '/schema');
+        // schema.labels: ["Class","Entity","Individual","Patrol","Property","Type",...]
+        // 按类型分组到种子树下
+        const neo4jLabels = schema.labels || [];
+        const rtypes = schema.relationship_types || [];
+
+        // 以种子树为骨架，补充 Neo4j 中实际有数据的 label
+        const tree = SEED_TREE.map(n => {
+            const attrs = (n.attributes || []);
+            // 标记哪些标签在 Neo4j 中实际存在
+            return {...n, neo4j_node_count: schema.node_count, neo4j_edge_count: schema.edge_count};
+        });
+
+        document.getElementById('neo4jDot').classList.remove('offline');
+        document.getElementById('neo4jStatus').textContent =
+            `Neo4j 已连接 · ${schema.node_count} 节点 (数据库离线)`;
+        document.getElementById('nodeCountSmall').textContent =
+            `${neo4jLabels.length} 标签 · ${rtypes.length} 关系`;
+
+        return {tree, schema};
+    } catch(e2) {
+        return null;
+    }
+}
+
+// Neo4j 节点作为详情（数据库离线时）
+async function selectNeo4jFallback(node) {
+    activeModel = node;
+    treeRoot.querySelectorAll('.ot-tree-item').forEach(el => el.classList.remove('active'));
+    const activeEl = treeRoot.querySelector(`[data-mdl-id="${node.id}"]`);
+    if (activeEl) activeEl.classList.add('active');
+
+    document.getElementById('emptyState').style.display = 'none';
+    const detailEl = document.getElementById('detailContent');
+    detailEl.style.display = 'block';
+    detailEl.innerHTML = '<div class="ot-loading"><div class="ot-spinner"></div>查询 Neo4j 节点...</div>';
+    document.getElementById('mainPanel').scrollTop = 0;
+
+    try {
+        // 按本体类型名搜索 Neo4j 标签
+        const label = node.ontol_name; // "实体" "行为" 等
+        const schema = await apiGet(API_NEO4J + '/schema');
+
+        // 构建简单的 Neo4j 视图
+        detailEl.innerHTML = `
+            <div class="ot-detail-header">
+                <div class="breadcrumb">
+                    <a href="#" onclick="resetSelection();return false;">本体语义</a> /
+                    <span>${MODEL_TYPE_LABEL[node.ontol_model_type]||node.ontol_model_type}</span> /
+                    <span>${escHtml(node.ontol_name)}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:0.8rem;">
+                    <h1 style="margin-bottom:0;">${escHtml(node.ontol_name)}</h1>
+                    <span class="ot-tag" style="color:#f59e0b;">⏳ 数据库离线</span>
+                </div>
+                <p class="desc">${escHtml(node.ontol_model_desc || '')}</p>
+                <div class="meta-tags">
+                    <span class="ot-tag">类型: ${MODEL_TYPE_LABEL[node.ontol_model_type]||node.ontol_model_type}</span>
+                    <span class="ot-tag">Neo4j: ${schema.node_count} 节点 · ${schema.edge_count} 边</span>
+                </div>
+                <div class="ot-actions" style="margin-top:1.2rem;">
+                    <button class="btn btn-accent" onclick="window.location.href='/ontology'">🔗 在图建模中查看</button>
+                </div>
+            </div>
+            <div class="ot-section">
+                <h3><span class="dot"></span> Neo4j 标签</h3>
+                <div class="ot-label-grid">
+                    ${(schema.labels||[]).map(l => `<span class="ot-label-chip">${escHtml(l)}</span>`).join('')}
+                </div>
+            </div>
+            <div class="ot-section">
+                <h3><span class="dot"></span> 关系类型</h3>
+                <div class="ot-rel-list">
+                    ${(schema.relationship_types||[]).map(r => `<span class="ot-rel-chip">${escHtml(r)}</span>`).join('')}
+                </div>
+            </div>`;
+    } catch(e) {
+        detailEl.innerHTML = `
+            <div class="ot-detail-header">
+                <h1>${escHtml(node.ontol_name)}</h1>
+                <p class="desc">${escHtml(node.ontol_model_desc || '')}</p>
+                <div class="meta-tags">
+                    <span class="ot-tag">${MODEL_TYPE_LABEL[node.ontol_model_type]||node.ontol_model_type}</span>
+                    <span class="ot-tag" style="color:#ef4444;">离线模式</span>
+                </div>
+                <p style="margin-top:1rem;color:var(--text-dim);font-size:0.82rem;">⚠️ PostgreSQL 和 Neo4j 均不可用，仅显示预置模型定义。</p>
+            </div>`;
+    }
+}
+
+// ====================================================================
+// 初始化
+// ====================================================================
+async function init() {
+    // 1. 优先加载 PG 本体模型树
+    try {
+        const data = await apiGet(API_MODEL + '/tree?with_attrs=true');
+        treeData = data;
+        renderTree(null);
+        updateFooter(data);
+        document.getElementById('neo4jDot').classList.remove('offline');
+        document.getElementById('neo4jStatus').textContent =
+            `数据库已连接 · ${data.length} 节点`;
+        document.getElementById('nodeCountSmall').textContent = '就绪';
+        apiGet(API_MODEL + '/stats').then(s => {
+            document.getElementById('nodeCountSmall').textContent = `${s.model_count||0}模型 ${s.attr_count||0}字段`;
+        }).catch(()=>{});
+        // 覆盖 selectModel → PG 版本
+        window._selectModel = selectModel;
+        return;
+    } catch(e) {
+        console.warn('PG 不可用，降级到 Neo4j:', e.message);
+    }
+
+    // 2. PG 失败 → 降级到 Neo4j + 预置种子树
+    const neoResult = await loadFromNeo4j();
+    if (neoResult) {
+        treeData = neoResult.tree;
+        renderTree(null);
+        window._selectModel = selectNeo4jFallback;
+        // 覆盖树点击 → 走 Neo4j 降级函数
+        document.querySelectorAll('.ot-tree-item[data-mdl-id]').forEach(el => {
+            el.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const node = treeData.find(n => n.id === this.dataset.mdlId);
+                if (node) selectNeo4jFallback(node);
+            });
+        });
+        return;
+    }
+
+    // 3. 全部离线 → 纯种子数据
+    treeData = SEED_TREE;
+    renderTree(null);
+    document.getElementById('neo4jDot').classList.add('offline');
+    document.getElementById('neo4jStatus').textContent = '全部离线';
+    document.getElementById('nodeCountSmall').textContent = `${SEED_TREE.length} 预置`;
+    // 降级选择函数
+    window._selectModel = async function(node) {
+        activeModel = node;
+        treeRoot.querySelectorAll('.ot-tree-item').forEach(el => el.classList.remove('active'));
+        const el = treeRoot.querySelector(`[data-mdl-id="${node.id}"]`);
+        if (el) el.classList.add('active');
+        document.getElementById('emptyState').style.display = 'none';
+        const de = document.getElementById('detailContent');
+        de.style.display = 'block';
+        const tl = MODEL_TYPE_LABEL[node.ontol_model_type] || node.ontol_model_type;
+        de.innerHTML = `
+            <div class="ot-detail-header">
+                <div class="breadcrumb"><a href="#" onclick="resetSelection();return false;">本体语义</a> / <span>${tl}</span> / <span>${escHtml(node.ontol_name)}</span></div>
+                <h1>${escHtml(node.ontol_name)}</h1>
+                <p class="desc">${escHtml(node.ontol_model_desc || '')}</p>
+                <div class="meta-tags">
+                    <span class="ot-tag">${tl}</span>
+                    <span class="ot-tag">${MODEL_STATUS_LABEL[node.ontol_model_status]||node.ontol_model_status}</span>
+                    <span class="ot-tag" style="color:#ef4444;">离线模式</span>
+                </div>
+                <p style="margin-top:1rem;color:var(--text-dim);font-size:0.82rem;">⚠️ 数据库离线，仅显示预置模型 Schema。启动 PostgreSQL 后可进行 CRUD 操作。</p>
+            </div>`;
+        document.getElementById('mainPanel').scrollTop = 0;
+    };
+    // 重新绑定树点击到降级函数
+    document.querySelectorAll('.ot-tree-item[data-mdl-id]').forEach(el => {
+        el.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const node = treeData.find(n => n.id === this.dataset.mdlId);
+            if (node && window._selectModel) window._selectModel(node);
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+{% endblock %}

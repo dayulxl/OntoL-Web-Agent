@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph-worker
+  labels:
+    app: langgraph-worker
+    tier: backend
+spec:
+  replicas: 5  # 通常比 Gateway 多
+  selector:
+    matchLabels:
+      app: langgraph-worker
+  template:
+    metadata:
+      labels:
+        app: langgraph-worker
+        tier: backend
+    spec:
+      terminationGracePeriodSeconds: 60  # 给 in-flight 任务更多时间完成
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: langgraph-worker
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: app
+          image: your-registry/langgraph:latest
+          imagePullPolicy: IfNotPresent
+          command: ["celery"]
+          args: ["-A", "infrastructure.queue.task_queue", "worker", "--loglevel=info", "--concurrency=4"]
+          env:
+            # --- 角色标识 ---
+            - name: SERVICE_ROLE
+              value: "worker"
+            # --- Postgres ---
+            - name: POSTGRES_URI
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: postgres-uri
+            # --- Redis ---
+            - name: REDIS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: redis-uri
+            # --- Celery ---
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: celery-broker-url
+            # --- 模型 ---
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: anthropic-api-key
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: openai-api-key
+            # --- 可观测性 ---
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: langsmith-api-key
+            - name: LANGSMITH_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: langsmith-project
+            - name: OTEL_EXPORTER_ENDPOINT
+              value: "http://otel-collector:4317"
+            # --- 对象存储 ---
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-bucket
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-endpoint
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-access-key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-secret-key
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          # Worker 没有 HTTP 端点，使用命令探针
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from infrastructure.cache.redis import check_redis; import asyncio; asyncio.run(check_redis())"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5

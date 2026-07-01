@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph-gateway
+  labels:
+    app: langgraph-gateway
+    tier: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: langgraph-gateway
+  template:
+    metadata:
+      labels:
+        app: langgraph-gateway
+        tier: frontend
+    spec:
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: langgraph-gateway
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: app
+          image: your-registry/langgraph:latest
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn"]
+          args: ["gateway.app:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+              name: http
+          env:
+            # --- 角色标识 ---
+            - name: SERVICE_ROLE
+              value: "gateway"
+            # --- Redis ---
+            - name: REDIS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: redis-uri
+            # --- Celery Broker ---
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: celery-broker-url
+            # --- 对象存储 (静态资源) ---
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-endpoint
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-access-key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: s3-secret-key
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3

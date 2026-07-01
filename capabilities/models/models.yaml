@@ -1,0 +1,239 @@
+# =============================================================================
+# 大模型配置文件
+# =============================================================================
+# 按模型类型 (type) 分组，每个类型下再按提供商 (provider) 组织。
+# 一种模型可在多种类型中出现（如 GPT-4o 同时支持 LLM 和 Vision）。
+#
+# 优先级: 此 YAML 文件 > 环境变量 > 代码默认值
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 全局默认
+# ---------------------------------------------------------------------------
+default_llm: "deepseek-v4-pro"      # 默认 LLM 模型
+default_embedding: "text-embedding-3-large"  # 默认 Embedding 模型
+
+# =============================================================================
+# 1. LLM — 大语言模型 (Chat / Completion)
+# =============================================================================
+llm:
+
+  anthropic:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    models:
+      claude-opus-4-8:
+        temperature: 0
+        max_tokens: 4096
+        top_p: 0.9
+      claude-sonnet-4-6:
+        temperature: 0
+        max_tokens: 4096
+      claude-haiku-4-5:
+        temperature: 0
+        max_tokens: 4096
+
+  openai:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    models:
+      gpt-4o:
+        temperature: 0
+        max_tokens: 4096
+      gpt-4o-mini:
+        temperature: 0
+        max_tokens: 4096
+      o1-pro:
+        temperature: 1                  # o1 系列要求 temperature=1
+        max_tokens: 100000
+      o3-mini:
+        temperature: 1
+        max_tokens: 100000
+
+  custom:
+    provider: openai_compatible
+    api_key_env: CUSTOM_LLM_API_KEY
+    base_url_env: CUSTOM_LLM_BASE_URL
+    models:
+      qwen3-72b:
+        temperature: 0
+        max_tokens: 8192
+      deepseek-v3:
+        temperature: 0
+        max_tokens: 8192
+      deepseek-v4-pro:
+        temperature: 0
+        max_tokens: 8192
+      deepseek-v4-flash:
+        temperature: 0
+        max_tokens: 4096
+      llama-4-maverick:
+        temperature: 0
+        max_tokens: 4096
+      ollama-default:
+        temperature: 0
+        max_tokens: 4096
+
+  # llama.cpp 本地服务 (OpenAI 兼容 API)
+  llama_cpp:
+    provider: openai_compatible
+    api_key_env: LLAMA_CPP_API_KEY        # llama.cpp 默认不需要 key，留空即可
+    base_url: "http://127.0.0.1:8188/v1"  # 固定地址（集群部署时改为 Service DNS）
+    models:
+      qwen3-72b:                           # 你在 llama.cpp 中加载的模型名
+        temperature: 0
+        max_tokens: 8192
+      llama-4-maverick:
+        temperature: 0
+        max_tokens: 4096
+      deepseek-v3:
+        temperature: 0
+        max_tokens: 8192
+      any-model:                           # 通用占位 — llama.cpp 的 /v1/models 返回实际名称
+        temperature: 0
+        max_tokens: 4096
+      qwen3.6-27b:
+        temperature: 0
+        max_tokens: 8192
+
+# =============================================================================
+# 2. Embedding — 嵌入式 / 向量化模型
+# =============================================================================
+embedding:
+
+  openai:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    models:
+      text-embedding-3-large:
+        dimensions: 3072
+      text-embedding-3-small:
+        dimensions: 1536
+      text-embedding-ada-002:
+        dimensions: 1536
+
+  anthropic:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    models:
+      voyage-3-large:
+        dimensions: 1024
+      voyage-3:
+        dimensions: 1024
+      voyage-code-3:
+        dimensions: 2048
+
+  custom:
+    provider: openai_compatible
+    api_key_env: CUSTOM_LLM_API_KEY
+    base_url_env: CUSTOM_LLM_BASE_URL
+    models:
+      bge-m3:
+        dimensions: 1024
+      bge-large-zh:
+        dimensions: 1024
+      gte-qwen2-7b-instruct:
+        dimensions: 3584
+      nomic-embed-text:
+        dimensions: 768
+
+  llama_cpp:
+    provider: openai_compatible
+    api_key_env: LLAMA_CPP_API_KEY
+    base_url: "http://127.0.0.1:8188/v1"
+    models:
+      bge-m3:
+        dimensions: 1024
+      nomic-embed-text:
+        dimensions: 768
+
+# =============================================================================
+# 3. Reranker — 重排序模型
+# =============================================================================
+reranker:
+
+  custom:
+    provider: openai_compatible
+    api_key_env: CUSTOM_LLM_API_KEY
+    base_url_env: CUSTOM_LLM_BASE_URL
+    models:
+      bge-reranker-v2-m3:
+        top_n: 10
+      bge-reranker-large:
+        top_n: 10
+      cohere-rerank-v3:
+        top_n: 20
+
+# =============================================================================
+# 4. TTS — 文字转语音 (Text-to-Speech)
+# =============================================================================
+tts:
+
+  openai:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    models:
+      tts-1:
+        voice: "alloy"
+        format: "mp3"
+        speed: 1.0
+      tts-1-hd:
+        voice: "alloy"
+        format: "mp3"
+        speed: 1.0
+
+# =============================================================================
+# 5. STT — 语音转文字 (Speech-to-Text)
+# =============================================================================
+stt:
+
+  openai:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    models:
+      whisper-1:
+        language: "zh"
+        response_format: "text"
+
+# =============================================================================
+# 6. Vision — 视觉 / 多模态模型
+# =============================================================================
+vision:
+
+  anthropic:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    models:
+      claude-opus-4-8:
+        temperature: 0
+        max_tokens: 4096
+      claude-sonnet-4-6:
+        temperature: 0
+        max_tokens: 4096
+
+  openai:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    models:
+      gpt-4o:                           # 自动化视觉能力
+        temperature: 0
+        max_tokens: 4096
+      gpt-4o-mini:
+        temperature: 0
+        max_tokens: 4096
+
+# =============================================================================
+# 7. Image — 图片生成模型
+# =============================================================================
+image:
+
+  openai:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    models:
+      dall-e-3:
+        size: "1024x1024"
+        quality: "standard"
+        style: "vivid"
+      dall-e-2:
+        size: "512x512"

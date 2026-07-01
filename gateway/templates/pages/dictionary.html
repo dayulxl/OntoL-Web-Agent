@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}维度管理 — OntoL{% endblock %}
+
+{% block extra_head %}
+<style>
+.dict-page { max-width: 900px; margin: 2rem auto; }
+.dict-page h1 { margin-bottom: 0.5rem; }
+.dict-page .desc { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.5rem; }
+
+.dict-search { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.dict-search input { flex: 1; }
+.dict-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.dict-tab { padding: 0.4rem 1rem; border-radius: 6px; border: 1px solid var(--border); color: var(--text-dim); font-size: 0.8rem; cursor: pointer; transition: all 0.15s; background: transparent; }
+.dict-tab:hover { border-color: var(--accent); color: var(--accent); }
+.dict-tab.active { background: rgba(0,212,255,0.1); border-color: var(--accent); color: var(--accent); }
+
+.dict-table { width: 100%; }
+.dict-table th { font-size: 0.72rem; }
+.dict-table td { font-size: 0.82rem; }
+.dict-table td code { font-size: 0.78rem; color: var(--accent); background: rgba(0,212,255,0.06); padding: 0.1rem 0.4rem; border-radius: 3px; }
+.dict-table .relation { color: #f59e0b; font-weight: 600; }
+
+.dict-add-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; padding: 1rem; background: rgba(0,212,255,0.02); border: 1px dashed var(--border); border-radius: 8px; }
+.dict-add-row input { flex: 1; min-width: 0; }
+.dict-add-row .btn { flex-shrink: 0; }
+
+.empty-state { text-align: center; padding: 3rem; color: var(--text-dim); }
+.empty-state .icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.4; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dict-page">
+    <h1>📖 维度管理</h1>
+    <p class="desc">管理 Neo4j 知识图谱中的关系类型词典、实体标签词典、属性词典</p>
+
+    <div class="dict-search">
+        <input id="dictSearch" type="text" placeholder="搜索词典条目..." oninput="filterDict()" />
+        <button class="btn" onclick="loadAll()">🔄 刷新</button>
+    </div>
+
+    <div class="dict-tabs">
+        <button class="dict-tab active" data-tab="behavior" onclick="switchTab('behavior')">行为函数</button>
+        <button class="dict-tab" data-tab="constraint" onclick="switchTab('constraint')">约束函数</button>
+        <button class="dict-tab" data-tab="custom" onclick="switchTab('custom')">定制函数</button>
+        <button class="dict-tab" data-tab="relations" onclick="switchTab('relations')">关系类型</button>
+        <button class="dict-tab" data-tab="labels" onclick="switchTab('labels')">实体标签</button>
+    </div>
+
+    <!-- 新增行 -->
+    <div class="dict-add-row" id="addRow">
+        <input id="addName" placeholder="名称" />
+        <input id="addDesc" placeholder="描述（可选）" />
+        <button class="btn btn-accent" onclick="addEntry()">＋ 添加</button>
+    </div>
+
+    <!-- 表格 -->
+    <div id="dictTable"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const API = '/api/v1/ontology';
+let currentTab = 'behavior';
+let relations = [];
+let labels = [];
+let behaviorFns = [];      // 行为函数 (create/simulate)
+let constraintFns = [];    // 约束函数 (load_swrl/execute/infer)
+let customFns = [];        // 用户自定义函数
+
+const BEHAVIOR_NAMES = new Set(['create_entity','create_type','create_patrol','create_relationship','update_entity','simulate_patrol','simulate_strike']);
+const CONSTRAINT_NAMES = new Set(['load_swrl_rule','execute_reasoning','infer_forward']);
+
+async function ontApi(path, opts) {
+    const r = await fetch(API + path, opts);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+
+async function loadAll() {
+    try {
+        const [schemaData, nodes] = await Promise.all([
+            ontApi('/schema'),
+            ontApi('/nodes?limit=500'),
+        ]);
+        relations = (schemaData.relationship_types || []).sort();
+        labels = (schemaData.labels || []).sort();
+
+        // 加载 Rust 工具 → 按行为/约束分类
+        try {
+            const resp = await fetch('/api/v1/tools');
+            if (resp.ok) {
+                const tools = await resp.json();
+                const all = tools.map(t => {
+                    const fn = t.function || t;
+                    return {
+                        name: fn.name, desc: fn.description || '',
+                        params: fn.parameters?.properties ? Object.keys(fn.parameters.properties).join(', ') : '',
+                        required: fn.parameters?.required || [],
+                    };
+                });
+                behaviorFns = all.filter(f => BEHAVIOR_NAMES.has(f.name));
+                constraintFns = all.filter(f => CONSTRAINT_NAMES.has(f.name));
+                customFns = all.filter(f => !BEHAVIOR_NAMES.has(f.name) && !CONSTRAINT_NAMES.has(f.name));
+            }
+        } catch(_) {}
+
+        renderDict();
+    } catch(e) {
+        document.getElementById('dictTable').innerHTML = `<div class="empty-state"><div class="icon">❌</div><p>${e.message}</p></div>`;
+    }
+}
+
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.dict-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    const as = document.getElementById('addRow');
+    if (tab === 'relations' || tab === 'labels' || tab === 'custom') {
+        as.style.display = 'flex';
+        document.getElementById('addName').placeholder = tab === 'custom' ? '函数名称' : (tab === 'relations' ? '关系名称（如 移动、包含）' : '标签名称（如 Entity、Patrol）');
+        document.getElementById('addDesc').placeholder = tab === 'custom' ? '函数描述' : '描述（可选）';
+    } else {
+        as.style.display = 'none';  // 行为/约束函数从 Rust 同步，不支持手动添加
+    }
+    renderDict();
+}
+
+function filterDict() {
+    renderDict();
+}
+
+function renderFnTable(list, color) {
+    const kw = (document.getElementById('dictSearch')?.value || '').trim().toLowerCase();
+    const filtered = kw ? list.filter(f => f.name.toLowerCase().includes(kw) || f.desc.toLowerCase().includes(kw)) : list;
+    const headers = ['函数名', '描述', '参数', '必填'];
+    const rows = filtered.map(f => `<tr>
+        <td><code style="color:${color};font-size:0.82rem;">${escHtml(f.name)}</code></td>
+        <td style="color:var(--text-dim);font-size:0.78rem;max-width:280px;">${escHtml(f.desc).substring(0,100) || '—'}</td>
+        <td style="font-size:0.75rem;color:var(--text-dim);">${escHtml(f.params) || '—'}</td>
+        <td style="font-size:0.75rem;">${(f.required||[]).join(', ') || '—'}</td>
+    </tr>`).join('');
+    document.getElementById('dictTable').innerHTML = `<table class="dict-table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows || '<tr><td colspan="4"><div class="empty-state">暂无数据</div></td></tr>'}</tbody></table>`;
+}
+
+function renderCustomFnTable() {
+    const kw = (document.getElementById('dictSearch')?.value || '').trim().toLowerCase();
+    const filtered = kw ? customFns.filter(f => f.name.toLowerCase().includes(kw) || f.desc.toLowerCase().includes(kw)) : customFns;
+    const headers = ['函数名', '描述', '参数', '必填', '操作'];
+    const rows = filtered.map(f => `<tr>
+        <td><code style="color:#22c55e;font-size:0.82rem;">${escHtml(f.name)}</code></td>
+        <td style="color:var(--text-dim);font-size:0.78rem;max-width:260px;">${escHtml(f.desc).substring(0,80) || '—'}</td>
+        <td style="font-size:0.75rem;color:var(--text-dim);">${escHtml(f.params) || '—'}</td>
+        <td style="font-size:0.75rem;">${(f.required||[]).join(', ') || '—'}</td>
+        <td><button class="btn" style="font-size:0.65rem;padding:0.1rem 0.5rem;border-color:#ef4444;color:#ef4444;" onclick="deleteFuncEntry('${escHtml(f.name)}')">删除</button></td>
+    </tr>`).join('');
+    document.getElementById('dictTable').innerHTML = `<table class="dict-table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows || '<tr><td colspan="5"><div class="empty-state">暂无自定义函数</div></td></tr>'}</tbody></table>`;
+}
+
+function renderKVTable(list, colName, descMap) {
+    const kw = (document.getElementById('dictSearch')?.value || '').trim().toLowerCase();
+    const filtered = kw ? list.filter(d => d.toLowerCase().includes(kw)) : list;
+    const headers = [colName, '说明', '操作'];
+    const rows = filtered.map(d => `<tr><td><code>${escHtml(d)}</code></td><td style="color:var(--text-dim);">${(descMap||{})[d]||'—'}</td><td><button class="btn" style="font-size:0.65rem;padding:0.1rem 0.5rem;border-color:#ef4444;color:#ef4444;" onclick="deleteEntry('${escHtml(d)}')">删除</button></td></tr>`).join('');
+    document.getElementById('dictTable').innerHTML = `<table class="dict-table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows || '<tr><td colspan="3"><div class="empty-state">暂无数据</div></td></tr>'}</tbody></table>`;
+}
+
+function renderDict() {
+    if (currentTab === 'behavior') renderFnTable(behaviorFns, '#3b82f6');
+    else if (currentTab === 'constraint') renderFnTable(constraintFns, '#8b5cf6');
+    else if (currentTab === 'custom') renderCustomFnTable();
+    else if (currentTab === 'relations') renderKVTable(relations, '关系名', REL_DESC);
+    else if (currentTab === 'labels') renderKVTable(labels, '标签名', LABEL_DESC);
+}
+
+// 关系描述映射
+const REL_DESC = {
+    '移动': '实体空间位置变化', '包含': '整体与部分的关系', '隶属': '组织层级归属',
+    '协同': '作战单位配合关系', '指挥': '上下级指挥授权', '侦察': '情报采集活动',
+    '支援': '作战资源协助', '部署于': '军事力量地理位置', '拥有': '所有权/装备关系',
+    'subClassOf': '本体分类层级', 'DEPLOYED_TO': '部署位置关系',
+};
+const LABEL_DESC = {
+    'Entity': '作战实体', 'Individual': '单个实例', 'Class': '分类/装备类型',
+    'Property': '属性值', 'Patrol': '巡逻任务', 'Type': '类别定义',
+};
+
+async function addEntry() {
+    const name = document.getElementById('addName')?.value?.trim();
+    const desc = document.getElementById('addDesc')?.value?.trim();
+    if (!name) return;
+
+    if (currentTab === 'relations') {
+        if (relations.includes(name)) { alert('关系类型已存在'); return; }
+        relations.push(name); relations.sort();
+    } else if (currentTab === 'labels') {
+        if (labels.includes(name)) { alert('标签已存在'); return; }
+        labels.push(name); labels.sort();
+    } else if (currentTab === 'custom') {
+        if (customFns.some(f => f.name === name)) { alert('函数已存在'); return; }
+        customFns.push({ name, desc: desc || '', params: '', required: [] });
+        customFns.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    document.getElementById('addName').value = '';
+    document.getElementById('addDesc').value = '';
+    renderDict();
+    showToast(`已添加 "${name}"`, 'success');
+}
+
+async function deleteEntry(name) {
+    if (!confirm(`确定删除 "${name}" 吗？`)) return;
+    if (currentTab === 'relations') relations = relations.filter(r => r !== name);
+    else if (currentTab === 'labels') labels = labels.filter(l => l !== name);
+    renderDict();
+    showToast(`已删除 "${name}"`, 'success');
+}
+
+function deleteFuncEntry(name) {
+    if (!confirm(`确定删除函数 "${name}" 吗？`)) return;
+    customFns = customFns.filter(f => f.name !== name);
+    renderDict();
+    showToast(`已删除 "${name}"`, 'success');
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function showToast(msg, type) {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;top:80px;right:1.5rem;padding:0.6rem 1rem;border-radius:8px;font-size:0.82rem;z-index:999;';
+    t.textContent = msg;
+    t.style.background = type === 'success' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)';
+    t.style.border = `1px solid ${type === 'success' ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'}`;
+    t.style.color = type === 'success' ? '#22c55e' : '#ef4444';
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; }, 2500);
+    setTimeout(() => t.remove(), 2800);
+}
+
+document.addEventListener('DOMContentLoaded', loadAll);
+</script>
+{% endblock %}

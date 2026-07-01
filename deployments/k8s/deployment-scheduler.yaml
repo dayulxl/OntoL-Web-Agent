@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph-scheduler
+  labels:
+    app: langgraph-scheduler
+    tier: backend
+spec:
+  replicas: 1  # 单实例 (Celery Beat 不能多副本)
+  selector:
+    matchLabels:
+      app: langgraph-scheduler
+  template:
+    metadata:
+      labels:
+        app: langgraph-scheduler
+        tier: backend
+    spec:
+      containers:
+        - name: app
+          image: your-registry/langgraph:latest
+          imagePullPolicy: IfNotPresent
+          command: ["celery"]
+          args: ["-A", "infrastructure.queue.task_queue", "beat", "--loglevel=info"]
+          env:
+            - name: SERVICE_ROLE
+              value: "scheduler"
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: celery-broker-url
+            - name: POSTGRES_URI
+              valueFrom:
+                secretKeyRef:
+                  name: langgraph-secrets
+                  key: postgres-uri
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"

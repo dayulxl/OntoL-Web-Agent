@@ -1,0 +1,696 @@
+{% extends "base.html" %}
+{% block title %}本体建模 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<!-- React + ReactDOM + ReactFlow 从 unpkg CDN 加载 -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<!-- ReactFlow CSS + JS -->
+<link rel="stylesheet" href="https://unpkg.com/reactflow@11/dist/style.css">
+<script src="https://unpkg.com/reactflow@11/dist/umd/index.js"></script>
+<style>
+/* 覆盖 base.html 的 container 限制 — 本体页面全宽全高 */
+body { overflow: hidden; }
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+#root { width: 100%; height: calc(100vh - 60px); }
+
+/* 节点按标签着色 */
+.node-Entity { background: rgba(0, 212, 255, 0.15); border: 2px solid rgba(0, 212, 255, 0.5); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+.node-Individual { background: rgba(0, 212, 255, 0.15); border: 2px solid rgba(0, 212, 255, 0.5); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+.node-Class { background: rgba(124, 58, 237, 0.15); border: 2px solid rgba(124, 58, 237, 0.5); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+.node-Property { background: rgba(34, 197, 94, 0.15); border: 2px solid rgba(34, 197, 94, 0.5); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+.node-Patrol { background: rgba(249, 115, 22, 0.15); border: 2px solid rgba(249, 115, 22, 0.5); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+.node-Type { background: rgba(239, 68, 68, 0.15); border: 2px solid rgba(239, 68, 68, 0.5); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+.node-default { background: rgba(17, 24, 72, 0.8); border: 2px solid rgba(0, 212, 255, 0.2); border-radius: 6px; padding: 8px 14px; color: #e8ecf4; font-size:12px; text-align: center; }
+
+/* 工具栏 — 浮动在左上 */
+.toolbar { position: fixed; top: 60px; left: 0; right: 0; z-index: 10; display: flex; gap: 0.4rem; padding: 0.4rem 1rem; background: rgba(10, 15, 40, 0.92); border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; backdrop-filter: blur(8px); }
+.toolbar button { padding: 0.3rem 0.7rem; font-size: 0.8rem; white-space: nowrap; }
+.toolbar input { width: 160px; padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+.toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 0.2rem; }
+.toolbar .hint { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; }
+
+/* 内容区在工具栏下方 */
+#root { margin-top: 38px; height: calc(100vh - 98px); }
+
+/* ReactFlow 控件深色主题 */
+.react-flow__controls { background: rgba(10,15,40,0.9) !important; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.react-flow__controls-button { background: transparent !important; border-color: var(--border) !important; fill: #8892b0 !important; }
+.react-flow__controls-button:hover { background: rgba(0,212,255,0.1) !important; }
+.react-flow__minimap { background: rgba(10,15,40,0.8) !important; border: 1px solid var(--border) !important; }
+
+/* 侧边栏 */
+.sidebar { position: fixed; right: 0; top: 60px; width: 340px; height: calc(100vh - 60px); background: rgba(10, 15, 40, 0.96); border-left: 1px solid var(--border); overflow-y: auto; z-index: 100; padding: 1.2rem; backdrop-filter: blur(12px); display: none; }
+.sidebar.open { display: block; }
+.sidebar h3 { color: var(--accent); margin-bottom: 1rem; font-size: 1rem; }
+.sidebar label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.15rem; margin-top: 0.4rem; }
+.sidebar input, .sidebar textarea, .sidebar select { width: 100%; margin-bottom: 0.3rem; font-size: 0.8rem; }
+.sidebar .props-table { width: 100%; font-size: 0.78rem; }
+.sidebar .props-table td { padding: 0.25rem 0.3rem; border-bottom: 1px solid var(--border); color: #c0c8e0; }
+.sidebar .btn-row { display: flex; gap: 0.4rem; margin-top: 0.8rem; }
+.sidebar .close-btn { position: absolute; top: 0.6rem; right: 0.8rem; background: none; border: none; color: var(--text-dim); font-size: 1.2rem; cursor: pointer; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 工具栏 -->
+<div class="toolbar">
+    <button onclick="addNode()">＋ 节点</button>
+    <button onclick="addEdgeSidebar()">＋ 关系</button>
+    <button onclick="deleteSelected()">🗑 删除</button>
+    <span class="sep"></span>
+    <button onclick="fitView()">⊞ 适应</button>
+    <span class="sep"></span>
+    <input id="searchInput" type="text" placeholder="搜索节点..." onkeydown="if(event.key==='Enter')searchNodes()" />
+    <button onclick="searchNodes()">搜索</button>
+    <button onclick="clearSearch()" title="返回全部节点">清除</button>
+    <button onclick="loadAndRender()">刷新</button>
+    <span class="sep"></span>
+    <span id="nodeCount" class="hint">节点: - | 边: -</span>
+</div>
+
+<div id="root">
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8892b0;font-size:1rem;">
+        正在连接知识图谱...
+    </div>
+</div>
+
+<!-- 侧边栏 -->
+<div id="sidebar" class="sidebar">
+    <button class="close-btn" onclick="closeSidebar()">✕</button>
+    <div id="sidebarContent"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ====================================================================
+// API
+// ====================================================================
+const API = '/api/v1/ontology';
+
+async function api(path, opts) {
+    const r = await fetch(API + path, opts);
+    if (!r.ok) { const t = await r.text(); throw new Error(t); }
+    return r.json();
+}
+
+async function loadData() {
+    const [nodes, schema] = await Promise.all([
+        api('/nodes?limit=500'),
+        api('/schema').catch(() => ({ labels:[], relationship_types:[], node_count:0, edge_count:0 })),
+    ]);
+    document.getElementById('nodeCount').textContent =
+        `节点: ${schema.node_count || nodes.length} | 边: ${schema.edge_count || 0}`;
+    return { nodes, schema };
+}
+
+// ====================================================================
+// 全局状态
+// ====================================================================
+let selectedNode = null;
+let selectedEdge = null;
+let sidebarMode = 'view'; // view | add | edge
+let schemaData = { labels: [], relationship_types: [] };
+
+const LABEL_COLORS = {
+    Entity: '#00d4ff', Individual: '#00d4ff',
+    Class: '#7c3aed',
+    Property: '#22c55e',
+    Patrol: '#f97316',
+    Type: '#ef4444',
+};
+
+function toFlowNode(n) {
+    const label = n.labels?.[0] || 'default';
+    const name = n.properties?.name || n.properties?.title || '#' + n.id;
+    const x = n.properties?._x != null ? n.properties._x : Math.random() * 500 + 50;
+    const y = n.properties?._y != null ? n.properties._y : Math.random() * 400 + 50;
+    return {
+        id: String(n.id),
+        type: 'default',
+        position: { x, y },
+        data: { label: name, labelType: label, props: n.properties },
+        className: LABEL_COLORS[label] ? 'node-' + label : 'node-default',
+        style: { borderColor: LABEL_COLORS[label] || '#64748b' },
+    };
+}
+
+function toFlowEdges(nodes) {
+    const edges = [], seen = new Set();
+    for (const n of nodes) {
+        if (!n.relationships) continue;
+        for (const r of n.relationships) {
+            const key = n.id + '-' + r.target_id + '-' + r.type;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            edges.push({
+                id: String(r.edge_id || key),
+                source: String(n.id),
+                target: String(r.target_id),
+                type: 'smoothstep',
+                label: r.type,
+                markerEnd: { type: 'arrowclosed', color: '#64748b' },
+                style: { stroke: '#64748b' },
+                data: { type: r.type, props: r.props },
+            });
+        }
+    }
+    return edges;
+}
+
+// ====================================================================
+// ReactFlow 实例
+// ====================================================================
+let rfInstance = null;
+let _setNodes = null;  // 暴露给全局 searchNodes 使用
+let _setEdges = null;
+let _lastNeighborId = null;  // 记录最后一次邻域查询的节点 ID
+
+const rfContainer = document.getElementById('root');
+const { ReactFlow, ReactFlowProvider, Controls, MiniMap, Background, applyNodeChanges, applyEdgeChanges } = window.ReactFlow || {};
+if (!ReactFlow) {
+    rfContainer.innerHTML = '<div style="color:#f97316;padding:2rem;text-align:center;">ReactFlow CDN 加载失败，请检查网络连接</div>';
+}
+
+function makeNodeComponent(label, color) {
+    return function NodeComp({ data }) {
+        return React.createElement('div', { style: { borderColor: color } },
+            React.createElement('div', { style: { fontWeight: 600, fontSize: 13 } }, data.label),
+            data.props?.code &&
+                React.createElement('div', { style: { fontSize: 10, color: '#8892b0', marginTop: 2 } }, data.props.code)
+        );
+    };
+}
+
+const nodeTypes = {};
+for (const [label, color] of Object.entries(LABEL_COLORS)) {
+    nodeTypes[label] = makeNodeComponent(label, color);
+}
+
+function renderApp() {
+    if (!ReactFlow) return;
+
+    const App = () => {
+        const [nodes, setNodes] = React.useState([]);
+        const [edges, setEdges] = React.useState([]);
+        const reactFlowInstance = React.useRef(null);
+
+        React.useEffect(() => {
+            // 暴露 setter 给全局函数
+            _setNodes = setNodes;
+            _setEdges = setEdges;
+            loadData().then(({ nodes: nodeData, schema }) => {
+                schemaData = schema;
+                const ns = nodeData.map(toFlowNode);
+                const es = toFlowEdges(nodeData);
+                setNodes(ns);
+                setEdges(es);
+                setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2 }), 300);
+            }).catch(e => {
+                rfContainer.innerHTML = `<div style="color:#f97316;padding:2rem;text-align:center;">
+                    <p>❌ Neo4j 连接失败</p><p style="font-size:0.8rem;color:#8892b0;">${e.message}</p>
+                    <button onclick="location.reload()" style="margin-top:1rem;">重试</button></div>`;
+            });
+        }, []);
+
+        const onInit = React.useCallback((inst) => {
+            reactFlowInstance.current = inst;
+            rfInstance = inst;
+        }, []);
+
+        const onNodeClick = React.useCallback((_, node) => {
+            selectedNode = node;
+            selectedEdge = null;
+            sidebarMode = 'view';
+            openSidebar();
+            // 查询节点邻域 — 仅显示该节点及其关联节点
+            loadNeighborhood(node.id).catch(e => console.warn('邻域查询失败:', e));
+        }, []);
+
+        const onEdgeClick = React.useCallback((_, edge) => {
+            selectedEdge = edge;
+            selectedNode = null;
+            sidebarMode = 'insert-node';
+            openSidebar();
+        }, []);
+
+        const onPaneClick = React.useCallback(() => closeSidebar(), []);
+
+        const onConnect = React.useCallback((params) => {
+            // 自动创建连线
+            api('/edges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_id: Number(params.source),
+                    target_id: Number(params.target),
+                    rel_type: '移动',
+                    properties: {},
+                }),
+            }).then(() => {
+                // 保持当前视图: 如果在邻域中则重载邻域，否则全量刷新
+                if (_lastNeighborId) {
+                    loadNeighborhood(_lastNeighborId);
+                } else {
+                    loadAndRender();
+                }
+            }).catch(e => alert('连线失败: ' + e.message));
+        }, []);
+
+        return React.createElement(ReactFlow, {
+            nodes, edges,
+            onNodesChange: (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
+            onEdgesChange: (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+            onConnect,
+            onInit,
+            onNodeClick,
+            onEdgeClick,
+            onPaneClick,
+            nodeTypes,
+            fitView: true,
+            style: { background: 'transparent' },
+            defaultEdgeOptions: {
+                type: 'smoothstep',
+                markerEnd: { type: 'arrowclosed', color: '#64748b' },
+                style: { stroke: '#64748b' },
+            },
+        },
+            React.createElement(Background, { color: 'rgba(0,212,255,0.04)', gap: 20 }),
+            React.createElement(Controls),
+            React.createElement(MiniMap, {
+                nodeColor: (n) => LABEL_COLORS[n.data?.labelType] || '#64748b',
+                maskColor: 'rgba(10,15,40,0.6)',
+            })
+        );
+    };
+
+    const root = ReactDOM.createRoot(rfContainer);
+    root.render(React.createElement(App));
+}
+
+// 等 ReactFlow CDN 加载完再渲染（轮询，最多等 10 秒）
+function waitForReactFlow(retries) {
+    retries = retries || 50;
+    if (window.ReactFlow && window.ReactDOM) {
+        renderApp();
+    } else if (retries > 0) {
+        setTimeout(function() { waitForReactFlow(retries - 1); }, 200);
+    } else {
+        rfContainer.innerHTML = '<div style="color:#f97316;padding:2rem;text-align:center;">ReactFlow CDN 加载超时，请检查网络连接后刷新</div>';
+    }
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { waitForReactFlow(); });
+} else {
+    waitForReactFlow();
+}
+
+// Delete 键全局监听 → 走后端删除
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Delete' && (selectedNode || selectedEdge)) {
+        e.preventDefault();
+        deleteSelected();
+    }
+});
+
+// ====================================================================
+// 全局函数 (工具栏 + 侧边栏)
+// ====================================================================
+function fitView() { rfInstance?.fitView({ padding: 0.2 }); }
+
+function addNode() {
+    selectedNode = null; selectedEdge = null;
+    sidebarMode = 'add';
+    openSidebar();
+}
+
+async function deleteSelected() {
+    if (selectedNode) {
+        if (!confirm('确定删除节点 "' + (selectedNode.data?.label || selectedNode.id) + '" 及其所有关系？')) return;
+        try {
+            await api('/nodes/' + selectedNode.id, { method: 'DELETE' });
+            const deletedId = selectedNode.id;
+            closeSidebar();
+            // 无刷新更新画布
+            if (_lastNeighborId && _lastNeighborId !== deletedId) {
+                loadNeighborhood(_lastNeighborId);
+            } else {
+                _lastNeighborId = null;
+                loadAndRender();
+            }
+        } catch (e) { alert('删除失败: ' + e.message); }
+    } else if (selectedEdge) {
+        if (!confirm('确定删除该连线？')) return;
+        try {
+            await api('/edges/' + selectedEdge.id, { method: 'DELETE' });
+            closeSidebar();
+            if (_lastNeighborId) {
+                loadNeighborhood(_lastNeighborId);
+            } else {
+                loadAndRender();
+            }
+        } catch (e) { alert('删除失败: ' + e.message); }
+    } else {
+        alert('请先点击选择节点或边');
+    }
+}
+
+async function loadNeighborhood(nodeId) {
+    try {
+        // 递归拉取全部下级节点（BFS，最多 30 轮）
+        const seenIds = new Set();
+        const nodeMap = {};   // id -> raw node data
+        const edgeMap = {};   // edgeKey -> edge object
+        const queue = [nodeId];
+        let round = 0;
+        const MAX_ROUNDS = 30;
+
+        while (queue.length > 0 && round < MAX_ROUNDS) {
+            round++;
+            const batch = queue.splice(0, Math.min(3, queue.length));
+            const results = await Promise.allSettled(
+                batch.map(id => api('/neighborhood/' + id + '?depth=1'))
+            );
+
+            for (const result of results) {
+                if (result.status !== 'fulfilled') continue;
+                const data = result.value;
+                if (!data.node) continue;
+
+                const cid = String(data.node.id);
+                if (!nodeMap[cid]) {
+                    nodeMap[cid] = data.node;
+                    seenIds.add(cid);
+                }
+
+                for (const nb of (data.neighbors || [])) {
+                    const nid = String(nb.node_id);
+                    if (!seenIds.has(nid)) {
+                        nodeMap[nid] = {
+                            id: nb.node_id,
+                            labels: nb.labels || [],
+                            properties: nb.properties || {},
+                        };
+                        seenIds.add(nid);
+                        queue.push(nid);
+                    }
+                    if (nb.edge) {
+                        const ekey = String(nb.edge.id || (cid + '-' + nid + '-' + nb.edge.type));
+                        if (!edgeMap[ekey]) {
+                            edgeMap[ekey] = {
+                                id: ekey,
+                                source: cid,
+                                target: nid,
+                                type: 'smoothstep',
+                                label: nb.edge.type,
+                                markerEnd: { type: 'arrowclosed', color: '#64748b' },
+                                style: { stroke: '#64748b' },
+                                data: { type: nb.edge.type, props: nb.edge.properties || {} },
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        const allNodes = Object.values(nodeMap).map(toFlowNode);
+        const allEdges = Object.values(edgeMap);
+        if (_setNodes && _setEdges) {
+            _setNodes(allNodes);
+            _setEdges(allEdges);
+            _lastNeighborId = nodeId;
+            const centerName = nodeMap[nodeId]?.properties?.name || nodeMap[nodeId]?.properties?.title || '#' + nodeId;
+            document.getElementById('nodeCount').textContent =
+                `节点: ${allNodes.length} | 边: ${allEdges.length} (子图: ${centerName})`;
+            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 150);
+        }
+    } catch (e) { console.error('邻域查询失败:', e); }
+}
+
+async function searchNodes() {
+    const kw = document.getElementById('searchInput')?.value?.trim();
+    if (!kw) { alert('请输入搜索关键词'); return; }
+    try {
+        const results = await api('/search?keyword=' + encodeURIComponent(kw) + '&limit=30');
+        if (!results.length) { alert('未找到匹配节点'); return; }
+        // 逐个加载详情（含关系）
+        const allNodes = [];
+        for (const n of results) {
+            try {
+                const detail = await api('/nodes/' + n.id);
+                allNodes.push(detail);
+            } catch (_) { allNodes.push(n); }
+        }
+        const ns = allNodes.map(toFlowNode);
+        const es = toFlowEdges(allNodes);
+        // 直接更新 ReactFlow 画布
+        if (_setNodes && _setEdges) {
+            _setNodes(ns);
+            _setEdges(es);
+            document.getElementById('nodeCount').textContent =
+                `节点: ${ns.length} | 边: ${es.length} (搜索: ${kw})`;
+            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 100);
+        }
+    } catch (e) { alert('搜索失败: ' + e.message); }
+}
+
+async function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    _lastNeighborId = null;
+    await loadAndRender();
+}
+
+async function loadAndRender() {
+    try {
+        _lastNeighborId = null;
+        const { nodes: nodeData, schema } = await loadData();
+        schemaData = schema;
+        const ns = nodeData.map(toFlowNode);
+        const es = toFlowEdges(nodeData);
+        if (_setNodes && _setEdges) {
+            _setNodes(ns);
+            _setEdges(es);
+            document.getElementById('nodeCount').textContent =
+                `节点: ${schema.node_count || ns.length} | 边: ${schema.edge_count || es.length}`;
+            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 100);
+        }
+    } catch (e) { alert('加载失败: ' + e.message); }
+}
+
+// ====================================================================
+// 侧边栏
+// ====================================================================
+const sidebarEl = document.getElementById('sidebar');
+const sidebarContent = document.getElementById('sidebarContent');
+
+function openSidebar() { sidebarEl.classList.add('open'); renderSidebar(); }
+function closeSidebar() { sidebarEl.classList.remove('open'); selectedNode = null; selectedEdge = null; }
+
+let _addEdgeNodes = []; // 创建关系时的候选节点列表
+
+async function addEdgeSidebar() {
+    selectedNode = null; selectedEdge = null;
+    sidebarMode = 'add-edge';
+    openSidebar();
+    // 异步加载节点列表填充下拉框
+    try {
+        const results = await api('/nodes?limit=500');
+        _addEdgeNodes = results;
+        renderSidebar(); // 下拉框有了数据后重新渲染
+    } catch (_) { _addEdgeNodes = []; }
+}
+
+async function createEdge() {
+    const srcId = Number(document.getElementById('edgeSource')?.value);
+    const tgtId = Number(document.getElementById('edgeTarget')?.value);
+    const relType = document.getElementById('edgeType')?.value?.trim() || '关联';
+    if (!srcId || !tgtId) { alert('请选择源节点和目标节点'); return; }
+    if (srcId === tgtId) { alert('源节点和目标节点不能相同'); return; }
+    try {
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: srcId, target_id: tgtId, rel_type: relType, properties: {} }) });
+        closeSidebar();
+        if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
+    } catch (e) { alert('创建关系失败: ' + e.message); }
+}
+
+function renderSidebar() {
+    const s = sidebarContent;
+
+    // 添加节点模式
+    if (sidebarMode === 'add') {
+        const labels = schemaData.labels.length ? schemaData.labels : ['Entity', 'Class', 'Property', 'Type', 'Patrol', 'Individual'];
+        s.innerHTML = `
+            <h3>创建节点</h3>
+            <label>标签</label>
+            <select id="newLabel">${labels.map(l => `<option value="${l}">${l}</option>`).join('')}</select>
+            <label>名称 (name)</label>
+            <input id="newName" placeholder="节点名称" />
+            <label>编码 (code)</label>
+            <input id="newCode" placeholder="可选编码" />
+            <div class="btn-row">
+                <button onclick="createNode()">创建</button>
+                <button onclick="closeSidebar()">取消</button>
+            </div>`;
+        return;
+    }
+
+    // 添加关系模式
+    if (sidebarMode === 'add-edge') {
+        const nodeOpts = _addEdgeNodes.map(n => {
+            const name = n.properties?.name || n.properties?.title || '#' + n.id;
+            return `<option value="${n.id}">#${n.id} ${name}</option>`;
+        }).join('');
+        const relTypes = schemaData.relationship_types?.length
+            ? schemaData.relationship_types.map(t => `<option value="${t}">${t}</option>`).join('')
+            : '<option value="关联">关联</option><option value="移动">移动</option><option value="包含">包含</option>';
+        s.innerHTML = `
+            <h3>创建关系</h3>
+            <label>源节点</label>
+            <select id="edgeSource">${nodeOpts}</select>
+            <label>目标节点</label>
+            <select id="edgeTarget">${nodeOpts}</select>
+            <label>关系类型</label>
+            <input id="edgeType" list="relTypesList" placeholder="关系类型，如 关联、移动" value="关联" />
+            <datalist id="relTypesList">${relTypes}</datalist>
+            <div class="btn-row">
+                <button onclick="createEdge()">创建</button>
+                <button onclick="closeSidebar()">取消</button>
+            </div>`;
+        return;
+    }
+
+    // 查看节点模式
+    if (selectedNode) {
+        const n = selectedNode;
+        const props = n.data?.props || {};
+        const entries = Object.entries(props).map(([k,v]) =>
+            `<tr><td style="color:var(--accent)">${k}</td><td>${String(v)}</td></tr>`
+        ).join('');
+        s.innerHTML = `
+            <h3>节点属性</h3>
+            <label>ID</label><input value="${n.id}" readonly />
+            <label>标签</label><input value="${n.data?.labelType || ''}" readonly />
+            <label>名称</label><input id="editName" value="${n.data?.label || ''}" />
+            <div class="tech-line"></div>
+            ${entries ? '<table class="props-table"><tbody>' + entries + '</tbody></table>' : '<p style="color:var(--text-dim);font-size:0.8rem;">无属性</p>'}
+            <div class="btn-row">
+                <button onclick="updateNode('${n.id}')">更新名称</button>
+                <button onclick="deleteSelected()" style="border-color:#ef4444;color:#ef4444;">删除</button>
+            </div>`;
+        return;
+    }
+
+    // 在边上插入节点模式
+    if (sidebarMode === 'insert-node' && selectedEdge) {
+        const e = selectedEdge;
+        const labels = schemaData.labels.length ? schemaData.labels : ['Entity', 'Class', 'Property', 'Type', 'Patrol', 'Individual'];
+        const relTypes = schemaData.relationship_types?.length
+            ? schemaData.relationship_types.map(t => `<option value="${t}">${t}</option>`).join('')
+            : '<option value="关联">关联</option><option value="移动">移动</option><option value="包含">包含</option>';
+        s.innerHTML = `
+            <h3>⚡ 边上插入节点</h3>
+            <div style="background:rgba(0,212,255,0.06);padding:0.5rem;border-radius:4px;margin-bottom:0.6rem;font-size:0.75rem;">
+                <div><b>上端:</b> #${e.source} → <b style="color:#f59e0b;">[新节点]</b> → #${e.target}</div>
+            </div>
+            <label>上端关系类型</label>
+            <input id="upperRelType" list="relTypesUpper" placeholder="源→新节点" value="${e.data?.type || e.label || '关联'}" />
+            <datalist id="relTypesUpper">${relTypes}</datalist>
+            <div class="tech-line"></div>
+            <label>新节点标签</label>
+            <select id="midLabel">${labels.map(l => `<option value="${l}">${l}</option>`).join('')}</select>
+            <label>新节点名称</label>
+            <input id="midName" placeholder="节点名称" />
+            <label>新节点编码</label>
+            <input id="midCode" placeholder="可选编码" />
+            <label style="display:flex;justify-content:space-between;align-items:center;">
+                节点属性 <button onclick="addPropRow()" style="font-size:0.7rem;padding:0.1rem 0.4rem;">＋</button>
+            </label>
+            <div id="propRows"></div>
+            <div class="tech-line"></div>
+            <label>下端关系类型</label>
+            <input id="lowerRelType" list="relTypesLower" placeholder="新节点→目标" value="${e.data?.type || e.label || '关联'}" />
+            <datalist id="relTypesLower">${relTypes}</datalist>
+            <div class="btn-row">
+                <button onclick="insertNodeOnEdge()" style="background:var(--accent);color:#000;font-weight:600;">插入</button>
+                <button onclick="closeSidebar()">取消</button>
+            </div>`;
+        return;
+    }
+}
+
+async function createNode() {
+    const label = document.getElementById('newLabel')?.value || 'Entity';
+    const name = document.getElementById('newName')?.value?.trim();
+    if (!name) { alert('请输入名称'); return; }
+    const code = document.getElementById('newCode')?.value?.trim();
+    const props = { name };
+    if (code) props.code = code;
+    try { await api('/nodes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label, properties: props }) }); closeSidebar(); loadAndRender(); }
+    catch (e) { alert('创建失败: ' + e.message); }
+}
+
+async function updateNode(id) {
+    const name = document.getElementById('editName')?.value?.trim();
+    if (!name) return;
+    try { await api('/nodes/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ properties: { name } }) }); closeSidebar(); loadAndRender(); }
+    catch (e) { alert('更新失败: ' + e.message); }
+}
+
+function addPropRow(key, val) {
+    const container = document.getElementById('propRows');
+    if (!container) return;
+    const idx = container.children.length;
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;gap:0.3rem;margin-bottom:0.3rem;';
+    div.innerHTML = `<input id="propKey${idx}" placeholder="属性名" value="${key || ''}" style="flex:1;min-width:0;" />
+        <input id="propVal${idx}" placeholder="值" value="${val || ''}" style="flex:1;min-width:0;" />
+        <button onclick="removePropRow(this)" style="flex:0 0 auto;font-size:0.7rem;padding:0.1rem 0.4rem;">✕</button>`;
+    container.appendChild(div);
+}
+
+function removePropRow(btn) { btn.parentElement.remove(); }
+
+async function insertNodeOnEdge() {
+    if (!selectedEdge) return;
+    const upperRel = document.getElementById('upperRelType')?.value?.trim() || '关联';
+    const lowerRel = document.getElementById('lowerRelType')?.value?.trim() || '关联';
+    const midLabel = document.getElementById('midLabel')?.value || 'Entity';
+    const midName = document.getElementById('midName')?.value?.trim();
+    if (!midName) { alert('请输入新节点名称'); return; }
+    const midCode = document.getElementById('midCode')?.value?.trim();
+
+    // 收集动态属性
+    const props = { name: midName };
+    if (midCode) props.code = midCode;
+    const propRows = document.querySelectorAll('#propRows > div');
+    propRows.forEach(row => {
+        const keyEl = row.querySelector('input:first-child');
+        const valEl = row.querySelector('input:nth-child(2)');
+        if (keyEl && valEl && keyEl.value.trim()) {
+            props[keyEl.value.trim()] = valEl.value.trim();
+        }
+    });
+
+    try {
+        // 1. 创建中间节点
+        const newNode = await api('/nodes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label: midLabel, properties: props }) });
+        const midId = newNode.id;
+
+        // 2. 创建上端连线 (源→新)
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: Number(selectedEdge.source), target_id: midId, rel_type: upperRel, properties: {} }) });
+
+        // 3. 创建下端连线 (新→目标)
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: midId, target_id: Number(selectedEdge.target), rel_type: lowerRel, properties: {} }) });
+
+        // 4. 删除原边
+        await api('/edges/' + selectedEdge.id, { method: 'DELETE' });
+
+        closeSidebar();
+        if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
+    } catch (e) { alert('插入节点失败: ' + e.message); }
+}
+</script>
+{% endblock %}

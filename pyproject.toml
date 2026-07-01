@@ -1,0 +1,84 @@
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "langgraph-cluster"
+version = "1.0.0"
+description = "LangChain/LangGraph 集群化智能服务 — 面向集群部署、方便运维的 AI 能力平台"
+authors = ["Dev Team <dev@example.com>"]
+readme = "README.md"
+packages = [{ include = "gateway" }, { include = "orchestrator" }, { include = "business" }, { include = "capabilities" }, { include = "infrastructure" }, { include = "common" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+# --- LangChain / LangGraph 核心 ---
+langchain = "^0.3.0"
+langchain-core = "^0.3.0"
+langgraph = "^0.3.0"
+
+# --- 模型提供商 ---
+langchain-anthropic = "^0.3.0"
+langchain-openai = "^0.3.0"
+
+# --- Web 框架 ---
+fastapi = "^0.115.0"
+uvicorn = { version = "^0.32.0", extras = ["standard"] }
+starlette = "^0.41.0"
+jinja2 = "^3.0.0"
+aiofiles = "^24.0.0"
+
+# --- 数据库 & 缓存 ---
+asyncpg = "^0.30.0"
+redis = "^5.0.0"
+neo4j = "^5.27.0"
+langchain-neo4j = "^0.3.0"
+
+# --- 可观测性 ---
+structlog = "^24.0.0"
+
+# --- 配置 ---
+pydantic = "^2.0.0"
+pydantic-settings = "^2.0.0"
+python-dotenv = "^1.0.0"
+pyyaml = "^6.0.0"
+
+[tool.poetry.group.dev.dependencies]
+# 测试
+pytest = "^8.0.0"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^5.0.0"
+httpx = "^0.28.0"
+
+# 代码质量
+ruff = "^0.7.0"
+mypy = "^1.13.0"
+black = "^24.0.0"
+isort = "^5.13.0"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --cov=. --cov-report=term-missing"
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
