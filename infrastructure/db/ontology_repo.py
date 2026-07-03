@@ -105,13 +105,15 @@ class OntologyRepo:
             return tree
 
         async with self._pool.acquire() as conn:
+            # 用 IN (?, ?, ...) 替代 PostgreSQL 的 ANY($1)，兼容 SQLite
+            placeholders = ", ".join(["?" for _ in model_ids])
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT * FROM ontol_model_attr
-                WHERE ontol_model_id = ANY($1) AND delete_flag = '0'
+                WHERE ontol_model_id IN ({placeholders}) AND delete_flag = '0'
                 ORDER BY attr_relation_flag DESC, attr_code
                 """,
-                model_ids,
+                *model_ids,
             )
         attrs = [dict(r) for r in rows]
         attr_map: dict[str, list] = {}

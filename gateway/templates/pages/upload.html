@@ -363,7 +363,17 @@ async function parseFile(filename) {
         parsedFilename = data.filename || filename;
 
         if (parsedEntities.length === 0) {
-            body.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);">未解析出本体实体，请检查文件内容</div>';
+            let errInfo = '';
+            if (data.chunks_failed > 0 && data.chunk_errors) {
+                errInfo = '<div style="margin-top:1rem;padding:0.8rem;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;">'
+                    + '<p style="color:#f87171;font-size:0.8rem;margin-bottom:0.4rem;">⚠️ ' + data.chunks_failed + '/' + (data.chunks_total||'?') + ' 个分块解析失败</p>'
+                    + data.chunk_errors.map(e => '<details style="font-size:0.72rem;color:var(--text-dim);margin-bottom:0.3rem;"><summary>' + escHtml(e.reason||'') + ' (块 #' + e.chunk_index + ')</summary><pre style="white-space:pre-wrap;max-height:120px;overflow-y:auto;font-size:0.65rem;margin-top:0.3rem;">' + escHtml((e.raw_snippet||'无').substring(0,500)) + '</pre></details>').join('')
+                    + '</div>';
+            }
+            body.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);">'
+                + '<p style="margin-bottom:0.5rem;">⚠️ 未解析出本体实体</p>'
+                + '<p style="font-size:0.78rem;">请检查文件内容是否包含可识别的实体信息，或尝试切换解析模型</p>'
+                + errInfo + '</div>';
             return;
         }
 
@@ -478,14 +488,14 @@ async function loadHistory() {
         if (!history.length) { el.innerHTML = '<div class="history-empty">暂无上传记录</div>'; return; }
         el.innerHTML = history.map(h => `
             <div class="history-item">
-                <div class="hinfo" onclick="previewFile('${escHtml(h.filename)}')" title="点击预览">
+                <div class="hinfo" onclick="previewFile(${jsStr(h.filename)})" title="点击预览">
                     <div class="hname">📄 ${escHtml(h.filename)}</div>
                     <div class="hmeta">${formatSize(h.size)} · ${(h.uploaded_at || '').substring(0,16).replace('T',' ')}</div>
                 </div>
                 <div class="haction">
-                    <button class="hbtn" onclick="event.stopPropagation();parseFile('${escHtml(h.filename)}')" title="AI 解析三元组">🔍</button>
+                    <button class="hbtn" onclick="event.stopPropagation();parseFile(${jsStr(h.filename)})" title="AI 解析三元组">🔍</button>
                     <a class="hbtn" href="${UPLOAD_API}/preview/${encodeURIComponent(h.filename)}" download="${escHtml(h.filename)}" title="下载" onclick="event.stopPropagation()">⬇</a>
-                    <button class="hbtn danger" onclick="event.stopPropagation();deleteFile('${escHtml(h.filename)}')" title="删除">🗑</button>
+                    <button class="hbtn danger" onclick="event.stopPropagation();deleteFile(${jsStr(h.filename)})" title="删除">🗑</button>
                 </div>
             </div>
         `).join('');
@@ -503,6 +513,7 @@ function showToast(msg, type) {
 }
 
 function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function jsStr(s) { return JSON.stringify(String(s||'')).replace(/"/g, '&quot;'); }  // JSON输出 → HTML实体化引号，避免与onclick引号冲突
 
 document.addEventListener('DOMContentLoaded', loadHistory);
 </script>

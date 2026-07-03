@@ -7,6 +7,7 @@ SQLite 文件数据库
 接口兼容 BaseRepository 风格，参数占位符自动转为 ?。
 """
 import asyncio
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,38 @@ def _now() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# 匹配 PostgreSQL 风格占位符 $1, $2, ... 及其数字索引
+_PG_PLACEHOLDER = re.compile(r'\$(\d+)')
+
+
+def _adapt_pg_sql(sql: str, params: tuple) -> tuple[str, tuple]:
+    """将 PostgreSQL SQL + 参数转换为 SQLite 兼容形式。
+
+    处理：
+    - $1, $2, ... 占位符 → ? （按出现顺序展开参数）
+    - ILIKE → LIKE
+    - 同一 $N 多次出现时，自动复制对应参数值
+    """
+    matches = list(_PG_PLACEHOLDER.finditer(sql))
+    if not matches:
+        sql = sql.replace('ILIKE', 'LIKE')
+        return sql, params
+
+    # 按 $N 出现顺序构建新参数列表
+    new_params: list = []
+    for m in matches:
+        idx = int(m.group(1)) - 1  # $1 → params[0]
+        if idx < len(params):
+            new_params.append(params[idx])
+        else:
+            new_params.append(None)  # 超出范围（通常不会发生）
+
+    # 替换所有 $N → ?
+    sql = _PG_PLACEHOLDER.sub('?', sql)
+    sql = sql.replace('ILIKE', 'LIKE')
+    return sql, tuple(new_params)
+
+
 class _Conn:
     """同步 sqlite3 连接的轻量异步包装。"""
 
@@ -29,9 +62,10 @@ class _Conn:
         self._conn.execute("PRAGMA foreign_keys=ON")
 
     def _run(self, sql: str, params: tuple = ()) -> list[dict]:
+        sql, params = _adapt_pg_sql(sql, params)
         cur = self._conn.execute(sql, params)
-        self._conn.commit()
         rows = cur.fetchall()
+        self._conn.commit()
         return [dict(r) for r in rows]
 
     def _run_one(self, sql: str, params: tuple = ()) -> Optional[dict]:
@@ -39,9 +73,13 @@ class _Conn:
         return rows[0] if rows else None
 
     def _exec(self, sql: str, params: tuple = ()) -> str:
+        sql, params = _adapt_pg_sql(sql, params)
         cur = self._conn.execute(sql, params)
+        rowcount = cur.rowcount
         self._conn.commit()
-        return f"DONE {cur.rowcount}"
+        # 兼容 BaseRepository.delete() 的返回值匹配 ("UPDATE 1" / "DELETE 1")
+        verb = sql.strip().split()[0].upper()
+        return f"{verb} {rowcount}"
 
     async def fetch(self, sql: str, *params: Any) -> list[dict]:
         return await asyncio.to_thread(self._run, sql, params)
@@ -53,14 +91,27 @@ class _Conn:
         return await asyncio.to_thread(self._exec, sql, params)
 
 
+class _AcquireContext:
+    """异步上下文管理器，模拟 asyncpg pool.acquire() 的返回对象。"""
+
+    def __init__(self, conn: _Conn):
+        self._conn = conn
+
+    async def __aenter__(self) -> _Conn:
+        return self._conn
+
+    async def __aexit__(self, *args) -> None:
+        pass
+
+
 class _Pool:
-    """伪连接池 — 单连接实现 acquire() 接口。"""
+    """伪连接池 — 单连接实现 acquire() 兼容接口，支持 async with。"""
 
     def __init__(self, path: str):
         self._conn = _Conn(path)
 
-    async def acquire(self) -> _Conn:
-        return self._conn
+    def acquire(self) -> _AcquireContext:
+        return _AcquireContext(self._conn)
 
 
 _conn: Optional[_Conn] = None

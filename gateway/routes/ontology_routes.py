@@ -133,6 +133,19 @@ async def ontology_schema(graph=Depends(get_graph)):
 
 
 # =========================================================================
+# Neighborhood — 图邻域查询
+# =========================================================================
+
+@router.get("/ontology/neighborhood/{node_id}")
+async def get_neighborhood(node_id: int, depth: int = 1, graph=Depends(get_graph)):
+    """获取节点的图邻域（关联节点 + 关系），支持 depth 1-3。"""
+    try:
+        return await graph.get_neighborhood(node_id, depth=depth)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Neo4j query failed: {e}")
+
+
+# =========================================================================
 # Node CRUD
 # =========================================================================
 
@@ -472,19 +485,26 @@ async def preview_file(filename: str):
 
 @router.delete("/upload/{filename:path}")
 async def delete_file(filename: str):
-    """删除上传的文件。"""
+    """删除上传的文件（同时清理历史记录）。"""
     upload_dir = _Path("infrastructure/storage/uploads")
     safe_name = os.path.basename(filename)
     file_path = upload_dir / safe_name
 
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"File '{safe_name}' not found")
+    file_deleted = False
+    if file_path.exists():
+        try:
+            file_path.unlink()
+            file_deleted = True
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
-    try:
-        file_path.unlink()
-        return {"deleted": True, "filename": safe_name}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # 无论文件是否存在，都从历史记录中移除该条目
+    history = _read_history()
+    remaining = [e for e in history if e.get("filename") != safe_name]
+    if len(remaining) != len(history):
+        _write_history(remaining)
+
+    return {"deleted": True, "filename": safe_name, "file_on_disk": file_deleted}
 
 
 # =========================================================================
@@ -627,34 +647,75 @@ class ImportEntitiesRequest(BaseModel):
 
 
 def _parse_entities_json(text: str) -> dict:
-    """从 LLM 输出中提取 JSON 格式的实体和关系。"""
+    """从 LLM 输出中提取 JSON 格式的实体和关系（多级降级策略）。"""
     import re, json
 
     text = text.strip()
 
-    # 尝试直接 JSON 解析
+    # 1. 直接 JSON 解析
     try:
-        return json.loads(text)
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # 尝试提取 ```json ... ``` 块
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    # 2. 提取 markdown 代码围栏（各种变体）
+    fence_patterns = [
+        r'```json\s*\n(.*?)\n\s*```',
+        r'```\s*\n(.*?)\n\s*```',
+        r'```json\s*(.*?)\s*```',
+        r'```\s*(.*?)\s*```',
+    ]
+    for pattern in fence_patterns:
+        for m in re.finditer(pattern, text, re.DOTALL | re.IGNORECASE):
+            try:
+                result = json.loads(m.group(1).strip())
+                if isinstance(result, dict):
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    # 3. 按大括号平衡匹配，逐个尝试每个顶层 JSON 对象
+    brace_depth = 0
+    start = -1
+    candidates = []
+    for i, ch in enumerate(text):
+        if ch == '{':
+            if brace_depth == 0:
+                start = i
+            brace_depth += 1
+        elif ch == '}':
+            brace_depth -= 1
+            if brace_depth == 0 and start >= 0:
+                candidates.append(text[start:i+1])
+                start = -1
+
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, dict) and ('entities' in result or 'relationships' in result):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    # 4. 最终降级：处理常见 LLM 附加文本后重试贪婪匹配
+    cleaned = re.sub(r'\*\*[^*]+\*\*', '', text)       # 去加粗
+    cleaned = re.sub(r'`[^`]+`', '', cleaned)           # 去行内代码
+    m = re.search(r'\{.*\}', cleaned, re.DOTALL)
     if m:
         try:
-            return json.loads(m.group(1))
+            return json.loads(m.group(0))
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # 尝试提取 { ... } 块
-    m = re.search(r"(\{.*\})", text, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(1))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    return {"entities": [], "relationships": []}
+    # 全失败：返回空结果 + 错误上下文
+    return {
+        "entities": [],
+        "relationships": [],
+        "_parse_error": True,
+        "_raw_snippet": text[:500],
+    }
 
 
 @router.post("/upload/parse")
@@ -701,6 +762,8 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
     all_entities: dict[str, dict] = {}  # name -> entity dict
     all_relationships: list[dict] = []
     seen_rels = set()
+    chunk_errors: list[dict] = []       # 记录每块的错误，反馈到前端
+    total_chunks = sum(1 for c in chunks if c and len(c) >= 10)
 
     onto_prompt = _build_ontology_prompt()
 
@@ -715,6 +778,15 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
             ])
             text = response.content if hasattr(response, "content") else str(response)
             result = _parse_entities_json(text)
+
+            # 检查是否解析失败（_parse_error 标记）
+            if result.pop("_parse_error", None):
+                chunk_errors.append({
+                    "chunk_index": i + 1,
+                    "reason": "JSON提取失败 — LLM 返回无法解析为 JSON",
+                    "raw_snippet": result.pop("_raw_snippet", "")[:300],
+                })
+                continue
 
             # Merge entities
             for ent in result.get("entities", []):
@@ -747,8 +819,11 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
                     seen_rels.add(key)
                     all_relationships.append({"subject": s, "predicate": p, "object": o})
 
-        except Exception:
-            continue
+        except Exception as e:
+            chunk_errors.append({
+                "chunk_index": i + 1,
+                "reason": f"LLM 调用失败: {str(e)}",
+            })
 
     entities_list = list(all_entities.values())
 
@@ -765,6 +840,10 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
         "type_counts": type_counts,
         "entities": entities_list,
         "relationships": all_relationships,
+        "chunks_total": total_chunks,
+        "chunks_ok": total_chunks - len(chunk_errors),
+        "chunks_failed": len(chunk_errors),
+        "chunk_errors": chunk_errors[:10],  # 最多返回前 10 条错误
     }
 
 
