@@ -44,6 +44,8 @@ class ToolsCallBody(BaseModel):
 # ── ontol_model / ontol_model_attr 请求体 ──
 
 class OntolModelCreateBody(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str = Field(..., max_length=32, description="模型ID（主键）")
     ontol_parent_id: Optional[str] = Field(None, max_length=32, description="父级模型ID")
     ontol_name: str = Field(..., max_length=50, description="本体名称")
@@ -52,6 +54,7 @@ class OntolModelCreateBody(BaseModel):
     ontol_model_desc: Optional[str] = Field(None, max_length=255, description="本体描述")
 
 class OntolModelUpdateBody(BaseModel):
+    model_config = {"extra": "ignore"}
     ontol_parent_id: Optional[str] = Field(None, max_length=32)
     ontol_name: Optional[str] = Field(None, max_length=50)
     ontol_model_type: Optional[str] = Field(None, max_length=2)
@@ -59,6 +62,8 @@ class OntolModelUpdateBody(BaseModel):
     ontol_model_desc: Optional[str] = Field(None, max_length=255)
 
 class OntolModelAttrCreateBody(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str = Field(..., max_length=32, description="属性ID（主键）")
     ontol_model_id: Optional[str] = Field(None, max_length=32)
     attr_name: str = Field(..., max_length=50)
@@ -66,16 +71,17 @@ class OntolModelAttrCreateBody(BaseModel):
     attr_data_type: str = Field("0", max_length=2)
     attr_length: Optional[str] = Field(None, max_length=10)
     attr_digit: Optional[str] = Field(None, max_length=10)
-    attr_is_only: Optional[str] = Field(None, max_length=2)
+    attr_is_only: Optional[str] = Field("0", max_length=2)
     attr_cascade_colum: Optional[str] = Field(None, max_length=50)
     attr_data_source_flag: Optional[str] = Field(None, max_length=2)
     attr_data_source: Optional[str] = Field(None, max_length=255)
-    attr_required: Optional[str] = Field(None, max_length=2)
+    attr_required: Optional[str] = Field("0", max_length=2)
     attr_default_value: Optional[str] = Field(None, max_length=500)
-    attr_relation_flag: Optional[str] = Field(None, max_length=2)
+    attr_relation_flag: Optional[str] = Field("0", max_length=2)
     attr_desc: Optional[str] = Field(None, max_length=50)
 
 class OntolModelAttrUpdateBody(BaseModel):
+    model_config = {"extra": "ignore"}
     attr_name: Optional[str] = Field(None, max_length=50)
     attr_code: Optional[str] = Field(None, max_length=50)
     attr_data_type: Optional[str] = Field(None, max_length=2)
@@ -322,7 +328,7 @@ async def get_ontology_model(model_id: str, repo=Depends(get_ontology_repo)):
 async def create_ontology_model(body: OntolModelCreateBody, repo=Depends(get_ontology_repo)):
     """创建本体模型。"""
     try:
-        return await repo.model.create(body.model_dump())
+        return await repo.model.insert(body.model_dump())
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Create failed: {e}")
 
@@ -358,11 +364,15 @@ async def list_model_attrs(model_id: str, relation_flag: Optional[str] = None, r
 
 @router.post("/ontology-models/{model_id}/attrs", status_code=201)
 async def create_model_attr(model_id: str, body: OntolModelAttrCreateBody, repo=Depends(get_ontology_repo)):
-    """创建模型属性。"""
+    """创建模型属性（后端生成 UUID 主键，前端传的 id 会被忽略）。"""
+    import uuid as _uuid
     data = body.model_dump()
+    data["id"] = _uuid.uuid4().hex[:16]          # 用 UUID 覆盖前端传的 id
     data["ontol_model_id"] = model_id
+    data.setdefault("create_time", datetime.utcnow())
+    data.setdefault("delete_flag", "0")
     try:
-        return await repo.attr.create(data)
+        return await repo.attr.insert(data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Create attr failed: {e}")
 
