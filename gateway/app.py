@@ -4,6 +4,7 @@ FastAPI 应用入口
 创建 FastAPI 实例，注册路由和中间件，挂载 LangGraph API 路由。
 """
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -93,4 +94,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
+        reload_dirs=[str(Path(__file__).resolve().parent.parent / d) for d in
+                     ("gateway", "orchestrator", "business", "capabilities", "common", "infrastructure", "webAPP")],
     )
