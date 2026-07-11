@@ -1028,6 +1028,30 @@ def _build_ontology_prompt() -> str:
     # ─── 5. 语义规范: OWL2 DL + SWRL + SHACL ──
     lines.append("""# 语义规范
 
+## 前缀约定
+
+| 序号 | 名称 | 编码前缀 | 格式示例 | 备注 |
+|------|------|----------|----------|------|
+| 1 | RDFS语言 | `rdfs:` | | RDFS语言 |
+| 2 | OWL2 DL语言 | `owl2:` | | OWL2 DL语言为主 |
+| 3 | SWRL语言 | `swrl:` | | SWRL语法 |
+| 4 | SHACL语言 | `sh:` | | |
+| 5 | 规则设定 | `rule:` | `rule:forwardChain`<br>`rule:backwardChain` | 默认就是前链推理 |
+| 6 | 自定义动作接口 | `action:` | `action:中文动作描述` | 后面写汉字，由大模型自主判断执行什么动作 |
+| 7 | 自定义函数 | `function:` | `{"id":"图ID","func"："函数名"}` | 对接大模型，用JSON实现 |
+
+## RDFS 核心词汇
+RDFS（RDF Schema）为 RDF 数据模型提供基础的类型系统和词汇描述能力：
+- **rdfs:subClassOf** — 子类关系（A 是 B 的子类型）
+- **rdfs:subPropertyOf** — 子属性关系
+- **rdfs:domain** — 属性定义域（该属性适用于哪类主体）
+- **rdfs:range** — 属性值域（该属性的值属于哪类客体）
+- **rdfs:label** — 人类可读标签
+- **rdfs:comment** — 注释说明
+- **rdfs:type** — 实例类型声明
+- **rdfs:Class** — 类
+- **rdfs:Property** — 属性
+
 ## 关系（predicate）— 使用 OWL2 DL 语义
 实体之间的关系遵循 OWL2 DL（Description Logic）标准，所有关系类型使用 `owl2:` 前缀：
 - **owl2:subClassOf** — 子类关系（A 是 B 的子类型）
@@ -1054,6 +1078,23 @@ def _build_ontology_prompt() -> str:
   - **sh:minCount / sh:maxCount** — 最小/最大出现次数
   - **sh:pattern** — 正则表达式匹配
   - **sh:in** — 枚举值约束
+
+## 推理规则设定（rule:）
+如文本中包含推理方向或策略设定，使用 `rule:` 前缀表达：
+  - `rule:forwardChain` — 前链推理（从已知事实推导新结论），**默认模式**
+  - `rule:backwardChain` — 后链推理（从目标反向寻找支撑条件）
+
+## 自定义动作接口（action:）
+`action:` 前缀后面写汉字描述，由大模型自主判断要执行什么动作。
+格式：`action:中文动作描述`
+示例：`action:查询最近的敌情报告`、`action:调取防空火力单元`
+
+如果文本中没有明确指定动作类型，默认使用 `action:` 前缀，由大模型自主填充动作描述。
+
+## 自定义函数（function:）
+如文本中需要执行自定义计算或处理逻辑，使用 `function:` 前缀，通过 JSON 传递参数对接大模型：
+  - 格式：`{"id": "图节点ID", "func"："函数名"}`
+  - 函数参数根据具体业务需求扩展
 
 ## 字段填写规则
 1. 每个字段尽量从原文中推断填充，无法推断则留空字符串 ""
