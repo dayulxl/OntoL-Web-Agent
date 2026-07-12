@@ -1,8 +1,9 @@
 """
 图记忆管理
 ----------
-基于 Neo4j 的知识图谱存储与检索，支持节点/关系 CRUD、Schema 发现、图遍历。
-作为 LangChain 的 Neo4jGraph 封装，供 Agent 和 Chain 使用。
+基于 Memgraph（Neo4j 兼容协议）的知识图谱存储与检索，
+支持节点/关系 CRUD、Schema 发现、图遍历。
+封装图数据库操作，供 Agent 和 Chain 使用。
 """
 from typing import Optional
 
@@ -15,7 +16,7 @@ class GraphMemory:
     """
     知识图谱记忆存储。
 
-    封装 Neo4j 图数据库的节点/关系操作，提供 Schema 发现和子图遍历能力。
+    封装 Memgraph/Neo4j 图数据库的节点/关系操作，提供 Schema 发现和子图遍历能力。
     通过 langchain-neo4j 的 Neo4jGraph 兼容 LangChain 生态。
 
     使用方式:
@@ -28,7 +29,7 @@ class GraphMemory:
     def __init__(self, driver: AsyncDriver):
         """
         Args:
-            driver: Neo4j 异步驱动实例（来自 infrastructure/db/neo4j.py）。
+            driver: 图数据库异步驱动实例（来自 infrastructure/db/neo4j.py）。
         """
         self._driver = driver
 
@@ -40,22 +41,33 @@ class GraphMemory:
         """
         获取图 Schema：所有标签和关系类型。
 
+        Memgraph 不使用 CALL db.labels() / CALL db.relationshipTypes()
+        这些是 Neo4j 专有存储过程，在此用标准 Cypher 替代。
+
         Returns:
             {"labels": [...], "relationship_types": [...],
              "node_count": int, "edge_count": int}
         """
         async with self._driver.session() as session:
-            labels_result = await session.run("CALL db.labels()")
+            # Memgraph 兼容：使用 UNWIND labels(n) 替代 CALL db.labels()
+            labels_result = await session.run(
+                "MATCH (n) UNWIND labels(n) AS label RETURN DISTINCT label"
+            )
             labels = [record["label"] async for record in labels_result]
 
-            rels_result = await session.run("CALL db.relationshipTypes()")
+            # Memgraph 兼容：使用 DISTINCT type(r) 替代 CALL db.relationshipTypes()
+            rels_result = await session.run(
+                "MATCH ()-[r]->() RETURN DISTINCT type(r) AS relationshipType"
+            )
             relationship_types = [record["relationshipType"] async for record in rels_result]
 
             node_count_r = await session.run("MATCH (n) RETURN count(n) AS cnt")
-            node_count = (await node_count_r.single())["cnt"]
+            node_count_rec = await node_count_r.single()
+            node_count = node_count_rec["cnt"] if node_count_rec else 0
 
             edge_count_r = await session.run("MATCH ()-[r]->() RETURN count(r) AS cnt")
-            edge_count = (await edge_count_r.single())["cnt"]
+            edge_count_rec = await edge_count_r.single()
+            edge_count = edge_count_rec["cnt"] if edge_count_rec else 0
 
         return {
             "labels": sorted(labels),
@@ -112,7 +124,7 @@ class GraphMemory:
         获取节点详情及邻接关系。
 
         Args:
-            node_id: Neo4j 内部节点 ID。
+            node_id: 图数据库内部节点 ID。
 
         Returns:
             {"id", "labels", "properties", "relationships": [...]} 或 None。
@@ -124,7 +136,8 @@ class GraphMemory:
                 WHERE id(n) = $node_id
                 OPTIONAL MATCH (n)-[r]-(m)
                 RETURN n, collect({edge_id: id(r), type: type(r), props: properties(r),
-                                   target_id: id(m), target_labels: labels(m)}) AS relationships
+                                   source_id: id(startNode(r)), target_id: id(endNode(r)),
+                                   related_id: id(m), related_labels: labels(m)}) AS relationships
                 """,
                 node_id=node_id,
             )
@@ -138,7 +151,7 @@ class GraphMemory:
                 "labels": list(node.labels),
                 "properties": dict(node),
                 "relationships": [
-                    r for r in record["relationships"] if r["target_id"] is not None
+                    r for r in record["relationships"] if r.get("target_id") is not None
                 ],
             }
 
@@ -160,25 +173,45 @@ class GraphMemory:
                 props=properties,
             )
             record = await result.single()
+            if not record:
+                raise InfrastructureError("Node creation returned empty result")
             node = record["n"]
             return {"id": node.id, "labels": list(node.labels), "properties": dict(node)}
 
-    async def update_node(self, node_id: int, properties: dict) -> Optional[dict]:
+    async def update_node(self, node_id: int, properties: dict, remove_keys: Optional[list[str]] = None) -> Optional[dict]:
         """
-        更新节点属性（合并，不删除已有属性）。
+        更新节点属性。SET 合并新属性，REMOVE 清除指定 key。
 
         Args:
             node_id: 节点 ID。
             properties: 要更新的属性。
+            remove_keys: 要删除的属性 key 列表。
 
         Returns:
             {"id", "labels", "properties"} 或 None。
         """
         async with self._driver.session() as session:
-            result = await session.run(
-                "MATCH (n) WHERE id(n) = $node_id SET n += $props RETURN n",
+            # 1. 合并新属性
+            await session.run(
+                "MATCH (n) WHERE id(n) = $node_id SET n += $props",
                 node_id=node_id,
                 props=properties,
+            )
+            # 2. 删除指定属性（Memgraph 不支持 n[$key] 动态属性访问，用 safe key + Cypher REMOVE）
+            if remove_keys:
+                import re as _re
+                for k in remove_keys:
+                    # 只允许字母/数字/下划线，防注入
+                    if not _re.match(r'^[A-Za-z_]\w*$', k):
+                        continue
+                    await session.run(
+                        f"MATCH (n) WHERE id(n) = $node_id REMOVE n.`{k}`",
+                        node_id=node_id,
+                    )
+            # 3. 返回最新状态
+            result = await session.run(
+                "MATCH (n) WHERE id(n) = $node_id RETURN n",
+                node_id=node_id,
             )
             record = await result.single()
             if not record:
@@ -261,13 +294,43 @@ class GraphMemory:
             record = await result.single()
             return record["deleted"] > 0
 
+    async def list_all_edges(self, limit: int = 2000) -> list[dict]:
+        """
+        列出所有关系（边）。
+
+        Args:
+            limit: 最大返回数。
+
+        Returns:
+            边列表 [{id, type, source_id, target_id, properties}, ...]。
+        """
+        async with self._driver.session() as session:
+            result = await session.run(
+                "MATCH (a)-[r]->(b) RETURN id(r) AS id, type(r) AS type, properties(r) AS properties, "
+                "id(a) AS source_id, id(b) AS target_id ORDER BY id LIMIT $limit",
+                limit=limit,
+            )
+            return [
+                {
+                    "id": record["id"],
+                    "type": record["type"],
+                    "source_id": record["source_id"],
+                    "target_id": record["target_id"],
+                    "properties": record["properties"] or {},
+                }
+                async for record in result
+            ]
+
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
 
     async def search_nodes(self, keyword: str, limit: int = 20) -> list[dict]:
         """
-        按关键词搜索节点。
+        按关键词搜索节点（大小写不敏感）。
+
+        使用 toLower + CONTAINS 替代 Neo4j 的 =~ 正则，
+        Memgraph 的 =~ 使用 RE2/ECMAScript 正则，不兼容 (?i) 内联标志。
 
         Args:
             keyword: 搜索关键词（在 name/title/description 属性中模糊匹配）。
@@ -276,12 +339,14 @@ class GraphMemory:
         Returns:
             匹配节点列表。
         """
-        kw = f"(?i).*{keyword.replace('*', '.*').replace('?', '.')}.*"
+        kw = keyword.lower()
         async with self._driver.session() as session:
             result = await session.run(
                 """
                 MATCH (n)
-                WHERE n.name =~ $kw OR n.title =~ $kw OR n.description =~ $kw
+                WHERE toLower(n.name) CONTAINS $kw
+                   OR toLower(n.title) CONTAINS $kw
+                   OR toLower(n.description) CONTAINS $kw
                 RETURN n LIMIT $limit
                 """,
                 kw=kw,
@@ -317,7 +382,8 @@ class GraphMemory:
                          labels: labels(m),
                          properties: properties(m),
                          path_length: dist,
-                         edge: {{id: id(rels[0]), type: type(rels[0]), properties: properties(rels[0])}}
+                         edge: {{id: id(rels[0]), type: type(rels[0]), properties: properties(rels[0]),
+                                source_id: id(startNode(rels[0])), target_id: id(endNode(rels[0]))}}
                        }}) AS neighbors
                 """,
                 node_id=node_id,
@@ -368,10 +434,9 @@ class GraphMemory:
         """
         from langchain_neo4j import Neo4jGraph
 
-        # 从驱动中提取配置信息
         return Neo4jGraph(
-            url=self._driver._pool.address.host if hasattr(self._driver, "_pool") else "neo4j://127.0.0.1:7687",
-            username="neo4j",
+            url="bolt://127.0.0.1:7687",
+            username="",
             password="",
             enhanced_schema=True,
         )

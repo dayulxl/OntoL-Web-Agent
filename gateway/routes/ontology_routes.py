@@ -263,7 +263,9 @@ async def create_node(body: NodeCreate, graph=Depends(get_graph)):
             snowflake_id = sf.next_id()
 
         props = dict(body.properties)
-        props.setdefault("id", snowflake_id)  # 雪花 ID 作为节点 id 属性
+        # 雪花 ID：如果前端没传 id 或 id 为空/占位符，自动生成
+        if not props.get("id") or props.get("id") == "大模型随机生成":
+            props["id"] = snowflake_id
         # 自动设置时间
         from datetime import datetime as _dt
         now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -395,6 +397,31 @@ async def delete_edge(edge_id: int, graph=Depends(get_graph)):
         raise
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Graph DB delete edge failed: {e}")
+
+
+class EdgeUpdate(BaseModel):
+    properties: dict = Field(default_factory=dict, description="边的属性（完整替换）")
+
+
+@router.put("/ontology/edges/{edge_id}")
+async def update_edge(edge_id: int, body: EdgeUpdate, graph=Depends(get_graph)):
+    """更新边的属性。"""
+    try:
+        from infrastructure.db.neo4j import get_driver
+        driver = await get_driver()
+        async with driver.session() as session:
+            result = await session.run(
+                "MATCH ()-[e]->() WHERE id(e) = $eid SET e += $props RETURN id(e) AS id, properties(e) AS props",
+                eid=edge_id, props=body.properties or {},
+            )
+            rec = await result.single()
+            if not rec:
+                raise HTTPException(status_code=404, detail=f"Edge {edge_id} not found")
+            return {"id": rec["id"], "properties": dict(rec["props"] or {})}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Graph DB update edge failed: {e}")
 
 
 @router.get("/ontology/edges")

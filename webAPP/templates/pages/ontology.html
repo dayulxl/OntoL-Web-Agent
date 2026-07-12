@@ -25,11 +25,11 @@ footer { display: none; }
 .react-flow__node .node-label { font-size: 5.5px !important; color: #f0f4ff !important; white-space: nowrap; line-height: 6px; transition: color 0.15s; }
 .react-flow__node .node-row:hover .node-label { color: #fff !important; text-shadow: 0 0 6px rgba(255,255,255,0.4); }
 
-/* Handle — 普通模式隐藏，连线模式可见可拖拽 */
-.node-handle { width: 14px !important; height: 14px !important; background: transparent !important; border: none !important; border-radius: 50% !important; position: absolute; top: -1px; }
+/* Handle — 由 ReactFlow 自行定位，只覆盖外观 */
+.node-handle { width: 14px !important; height: 14px !important; background: transparent !important; border: none !important; border-radius: 50% !important; }
 .node-handle:hover { background: rgba(255,255,255,0.2) !important; }
-.node-handle-left  { left: -3px; }
-.node-handle-right { right: -3px; }
+.node-handle-left  { left: -3px !important; }
+.node-handle-right { right: -3px !important; }
 /* 连线模式：Handle 显示为大锚点，容易抓住拉线 */
 .edge-creation-mode .node-handle { width: 18px !important; height: 18px !important; background: rgba(0,212,255,0.25) !important; border: 1px solid rgba(0,212,255,0.5) !important; top: -3px; cursor: crosshair; }
 .edge-creation-mode .node-handle-left  { left: -6px; }
@@ -186,7 +186,6 @@ let selectedNode = null;
 let selectedEdge = null;
 let sidebarMode = 'view'; // view | add | edge
 let schemaData = { labels: [], relationship_types: [] };
-let _edgeCreationMode = false;  // 是否处于连线创建模式
 
 const LABEL_COLORS = {
     Entity: '#00d4ff', Individual: '#00d4ff',
@@ -198,14 +197,15 @@ const LABEL_COLORS = {
 
 function toFlowNode(n) {
     const label = n.labels?.[0] || 'smoothstep';
-    const name = n.properties?.name || n.properties?.title || '#' + n.id;
+    const name = n.properties?.name || n.properties?.title || '#' + (n.properties?.id || n.id);
+    const snowflakeId = n.properties?.id;  // 雪花 ID（业务主键）
     const x = n.properties?._x != null ? n.properties._x : Math.random() * 500 + 50;
     const y = n.properties?._y != null ? n.properties._y : Math.random() * 400 + 50;
     return {
         id: String(n.id),
         type: nodeTypes[label] ? label : 'smoothstep',
         position: { x, y },
-        data: { label: name, labelType: label, props: n.properties },
+        data: { label: name, labelType: label, props: n.properties, snowflakeId: snowflakeId },
         className: '',
     };
 }
@@ -308,7 +308,7 @@ function renderApp() {
         const onEdgeClick = React.useCallback((_, edge) => {
             selectedEdge = edge;
             selectedNode = null;
-            sidebarMode = 'insert-node';
+            sidebarMode = 'view-edge';
             openSidebar();
             setHighlightedNodeId(null);
         }, []);
@@ -337,10 +337,6 @@ function renderApp() {
                     properties: {},
                 }),
             }).then(() => {
-                // 如果在连线模式，关闭侧边栏
-                if (_edgeCreationMode) {
-                    closeSidebar();
-                }
                 if (_lastNeighborId) {
                     loadNeighborhood(_lastNeighborId);
                 } else {
@@ -429,8 +425,6 @@ function fitView() { rfInstance?.fitView({ padding: 0.2 }); }
 function addNode() {
     selectedNode = null; selectedEdge = null;
     sidebarMode = 'add';
-    _edgeCreationMode = false;
-    document.getElementById('root').classList.remove('edge-creation-mode');
     openSidebar();
 }
 
@@ -606,8 +600,6 @@ function openSidebar() { sidebarEl.classList.add('open'); renderSidebar(); }
 function closeSidebar() {
     sidebarEl.classList.remove('open', 'wide');
     selectedNode = null; selectedEdge = null;
-    _edgeCreationMode = false;
-    document.getElementById('root').classList.remove('edge-creation-mode');
 }
 
 let _addEdgeNodes = []; // 创建关系时的候选节点列表
@@ -615,8 +607,6 @@ let _addEdgeNodes = []; // 创建关系时的候选节点列表
 async function addEdgeSidebar() {
     selectedNode = null; selectedEdge = null;
     sidebarMode = 'add-edge';
-    _edgeCreationMode = true;
-    document.getElementById('root').classList.add('edge-creation-mode');
     openSidebar();
     // 异步加载节点列表填充下拉框
     try {
@@ -632,8 +622,18 @@ async function createEdge() {
     const relType = document.getElementById('edgeType')?.value?.trim() || '关联';
     if (!srcId || !tgtId) { alert('请选择源节点和目标节点'); return; }
     if (srcId === tgtId) { alert('源节点和目标节点不能相同'); return; }
+
+    // 收集边属性
+    const properties = {};
+    const rows = document.querySelectorAll('#edgePropsContainer .edge-prop-row');
+    rows.forEach(row => {
+        const key = row.querySelector('.ep-key')?.value?.trim();
+        const val = row.querySelector('.ep-val')?.value?.trim();
+        if (key) { properties[key] = val; }
+    });
+
     try {
-        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: srcId, target_id: tgtId, rel_type: relType, properties: {} }) });
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: srcId, target_id: tgtId, rel_type: relType, properties }) });
         closeSidebar();
         if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
     } catch (e) { alert('创建关系失败: ' + e.message); }
@@ -650,10 +650,8 @@ function renderSidebar() {
             <select id="newOntType" onchange="onOntTypeChange()">
                 <option value="">-- 请选择 --</option>
             </select>
-            <label>标签 <span style="color:var(--text-dim);font-weight:400;">(实体下级本体)</span></label>
-            <select id="newLabel">
-                <option value="">-- 不选 --</option>
-            </select>
+            <label>标签 <span style="color:var(--text-dim);font-weight:400;">(手动输入图数据库标签名)</span></label>
+            <input id="newLabel" type="text" placeholder="如 Entity、Class、Property" value="Entity" />
             <div id="ontFields" style="margin-top:0.5rem;"></div>
             <div class="btn-row">
                 <button onclick="createNode()">创建</button>
@@ -665,8 +663,6 @@ function renderSidebar() {
             try {
                 const types = await fetchOntTypes();
                 const ontSel = document.getElementById('newOntType');
-                const labelSel = document.getElementById('newLabel');
-                // 排序：根本体（parent_id 为空或 M_ROOT）排最上面，然后子本体
                 const sortedTypes = [...types].sort((a, b) => {
                     const aRoot = !a.parent_id || a.parent_id === 'M_ROOT';
                     const bRoot = !b.parent_id || b.parent_id === 'M_ROOT';
@@ -675,20 +671,12 @@ function renderSidebar() {
                     return (a.type_code || '').localeCompare(b.type_code || '') || a.name.localeCompare(b.name);
                 });
                 sortedTypes.forEach(t => {
-                    // 本体类型下拉
                     if (ontSel) {
                         const opt = document.createElement('option');
                         opt.value = t.id;
                         const isRoot = !t.parent_id || t.parent_id === 'M_ROOT';
                         opt.textContent = `${isRoot ? '📂 ' : '└ '}${t.name} (${t.type_code||'?'}) · ${t.field_count}字段`;
                         ontSel.appendChild(opt);
-                    }
-                    // 标签下拉：仅实体本体模板的下级本体（parent_id 不为空且不为 M_ROOT）
-                    if (labelSel && t.parent_id && t.parent_id !== 'M_ROOT') {
-                        const opt = document.createElement('option');
-                        opt.value = t.id;
-                        opt.textContent = `${t.name} (${t.type_code||'?'})`;
-                        labelSel.appendChild(opt);
                     }
                 });
             } catch (e) { console.error('加载本体类型失败:', e); }
@@ -702,9 +690,6 @@ function renderSidebar() {
             const name = n.properties?.name || n.properties?.title || '#' + n.id;
             return `<option value="${n.id}">#${n.id} ${name}</option>`;
         }).join('');
-        const relTypes = schemaData.relationship_types?.length
-            ? schemaData.relationship_types.map(t => `<option value="${t}">${t}</option>`).join('')
-            : '<option value="关联">关联</option><option value="移动">移动</option><option value="包含">包含</option>';
         s.innerHTML = `
             <h3>创建关系</h3>
             <label>源节点</label>
@@ -712,92 +697,55 @@ function renderSidebar() {
             <label>目标节点</label>
             <select id="edgeTarget">${nodeOpts}</select>
             <label>关系类型</label>
-            <input id="edgeType" list="relTypesList" placeholder="关系类型，如 关联、移动" value="关联" />
-            <datalist id="relTypesList">${relTypes}</datalist>
-            <div class="btn-row">
+            <input id="edgeType" type="text" placeholder="如 actionType: \"inference\"" value='actionType: "inference"' />
+            <hr style="border-color:rgba(0,212,255,0.1);margin:0.8rem 0;" />
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+                <h4 style="font-size:0.8rem;color:var(--text-dim);margin:0;">增加边属性</h4>
+                <button onclick="addEdgePropRow()" style="font-size:0.65rem;padding:0.15rem 0.5rem;border:1px solid var(--accent);border-radius:3px;background:rgba(0,212,255,0.08);color:var(--accent);cursor:pointer;">+ 自定义</button>
+            </div>
+            <div id="edgePropsContainer" style="max-height:200px;overflow-y:auto;"></div>
+            <div class="btn-row" style="margin-top:0.8rem;">
                 <button onclick="createEdge()">创建</button>
                 <button onclick="closeSidebar()">取消</button>
+                <button onclick="resetEdgeProps()" style="border-color:rgba(245,158,11,0.3);color:#f59e0b;">📋 标准属性</button>
             </div>`;
+        return;
         return;
     }
 
-    // 查看节点模式
-    if (selectedNode) {
-        const n = selectedNode;
-        const props = n.data?.props || {};
-        // 受保护字段：仅查看不可编辑删除（id 已单独显示在 ID 行，这里跳过）
-        const READONLY_KEYS = ['id', 'name', 'code', 'type', 'create_time', 'update_time'];
-
-        // 先用原始顺序渲染，加载排序后再刷新
-        const renderNodeDetail = (props, fieldOrder) => {
-            // 如果没有排序规则，按原顺序
-            const sortedKeys = fieldOrder || Object.keys(props);
-            // 确保所有 props key 都在 sortedKeys 里
-            const seen = new Set();
-            const ordered = [];
-            for (const k of sortedKeys) {
-                if (props.hasOwnProperty(k) && !seen.has(k)) { ordered.push(k); seen.add(k); }
-            }
-            // 把不在排序规则里的 key 追加到末尾
-            for (const k of Object.keys(props)) {
-                if (!seen.has(k)) { ordered.push(k); }
-            }
-
-            const protectedProps = [];  // 按 order 排列的受保护字段
-            const editableEntries = []; // 按 order 排列的可编辑字段
-            for (const k of ordered) {
-                const v = props[k];
-                if (READONLY_KEYS.includes(k)) {
-                    if (k !== 'id') protectedProps.push([k, v]);  // id 已在外面单独显示
-                } else {
-                    editableEntries.push([k, v]);
-                }
-            }
-
-            let html = `<h3>节点属性</h3>
-                <label>ID</label><input value="${escHtml(String(n.id))}" readonly />
-                <label>标签</label><input value="${escHtml(n.data?.labelType || '')}" readonly />
-                ${protectedProps.map(([k,v]) => `
-                <label>${escHtml(k)}</label><input value="${escHtml(String(v ?? ''))}" readonly style="background:rgba(255,255,255,0.02);cursor:not-allowed;" />
-                `).join('')}
-                <label style="display:flex;justify-content:space-between;align-items:center;margin-top:0.6rem;">
-                    属性编辑 <button onclick="addPropRow()" style="font-size:0.7rem;padding:0.1rem 0.4rem;">＋ 添加属性</button>
-                </label>
-                <div id="propRows">
-                    ${editableEntries.map(([k,v], i) =>
-            `<div style="display:flex;gap:0.3rem;margin-bottom:0.3rem;">
-                            <input id="propKey${i}" placeholder="属性名" value="${escHtml(k)}" style="flex:1;min-width:0;" />
-                            <input id="propVal${i}" placeholder="值" value="${escHtml(String(v))}" style="flex:1;min-width:0;" />
-                            <button onclick="removePropRow(this)" style="flex:0 0 auto;font-size:0.7rem;padding:0.1rem 0.4rem;">✕</button>
-                         </div>`).join('')}
-                </div>
-                <div style="height:1px;background:rgba(255,255,255,0.05);margin:0.6rem 0;"></div>
-                <div id="historySection">
-                    <h4 style="font-size:0.8rem;color:var(--accent);margin-bottom:0.4rem;">📜 历史版本</h4>
-                    <div style="font-size:0.7rem;color:var(--text-dim);text-align:center;padding:0.5rem;">加载中...</div>
-                </div>
-                <div style="height:1px;background:rgba(255,255,255,0.05);margin:0.6rem 0;"></div>
-                <div class="btn-row">
-                    <button onclick="updateNode('${n.id}')">💾 更新</button>
-                    <button onclick="deleteSelected()" style="border-color:#ef4444;color:#ef4444;">删除</button>
-                </div>`;
-            return html;
-        };
-
-        // 先加载本体模板排序规则，再统一渲染
-        s.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);"><div class="ot-spinner" style="margin:0 auto 0.6rem;"></div>加载节点属性...</div>';
-        (async () => {
-            let fieldOrder = null;
-            const ontType = props.ont_type;
-            if (ontType) {
-                try {
-                    const fields = await fetchInheritedFields(ontType);
-                    if (fields && fields.length) fieldOrder = fields.map(f => f.code);
-                } catch (_) {}
-            }
-            s.innerHTML = renderNodeDetail(props, fieldOrder);
-            loadNodeHistory(n.id);
-        })();
+    // 查看/编辑边属性
+    if (sidebarMode === 'view-edge' && selectedEdge) {
+        const e = selectedEdge;
+        const edgeProps = e.data?.props || e.data?.properties || e.properties || {};
+        const relType = e.data?.type || e.data?.label || e.label || '关联';
+        const srcName = _addEdgeNodes.find(n => n.id === Number(e.source))?.properties?.name || '#' + e.source;
+        const tgtName = _addEdgeNodes.find(n => n.id === Number(e.target))?.properties?.name || '#' + e.target;
+        s.innerHTML = `
+            <h3>📎 关系详情</h3>
+            <div style="background:rgba(0,212,255,0.04);padding:0.6rem;border-radius:6px;margin-bottom:0.6rem;font-size:0.78rem;">
+                <div><b style="color:var(--text-dim);">ID:</b> ${e.id}</div>
+                <div><b style="color:var(--text-dim);">源:</b> #${e.source} (${escHtml(srcName)})</div>
+                <div><b style="color:var(--text-dim);">目标:</b> #${e.target} (${escHtml(tgtName)})</div>
+            </div>
+            <label>关系类型</label>
+            <input id="viewEdgeType" type="text" placeholder="如 actionType: \"inference\"" value="${escHtml(relType)}" style="width:100%;margin-bottom:0.6rem;font-size:0.78rem;padding:0.35rem 0.5rem;background:rgba(0,212,255,0.04);border:1px solid var(--border);border-radius:4px;color:var(--text);outline:none;" />
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+                <h4 style="font-size:0.8rem;color:var(--text-dim);margin:0;">边属性</h4>
+                <button onclick="addEdgePropRow()" style="font-size:0.65rem;padding:0.15rem 0.5rem;border:1px solid var(--accent);border-radius:3px;background:rgba(0,212,255,0.08);color:var(--accent);cursor:pointer;">+ 添加</button>
+            </div>
+            <div id="edgePropsContainer" style="max-height:250px;overflow-y:auto;"></div>
+            <div class="btn-row" style="margin-top:0.8rem;">
+                <button onclick="saveEdgeProps(${e.id})" style="background:var(--accent);color:#000;font-weight:600;">💾 保存属性</button>
+                <button onclick="switchToInsertNode()">⚡ 边上插节点</button>
+                <button onclick="deleteEdgeConfirm(${e.id})" style="border-color:#ef4444;color:#ef4444;">🗑 删除</button>
+                <button onclick="closeSidebar()">关闭</button>
+            </div>`;
+        // 只回填有值的属性（标准属性带占位提示）
+        const stdMap = {};
+        STandARD_EDGE_PROPS.forEach(p => { stdMap[p.key] = p.desc; });
+        Object.keys(edgeProps).forEach(k => {
+            if (edgeProps[k]) addEdgePropRow(k, edgeProps[k], stdMap[k] || '');
+        });
         return;
     }
 
@@ -837,6 +785,168 @@ function renderSidebar() {
             </div>`;
         return;
     }
+
+    // 查看节点模式
+    if (selectedNode) {
+        const n = selectedNode;
+        const props = n.data?.props || {};
+        const READONLY_KEYS = ['id', 'name', 'code', 'type', 'create_time', 'update_time'];
+
+        const renderNodeDetail = (props, fieldOrder) => {
+            const sortedKeys = fieldOrder || Object.keys(props);
+            const seen = new Set();
+            const ordered = [];
+            for (const k of sortedKeys) {
+                if (props.hasOwnProperty(k) && !seen.has(k)) { ordered.push(k); seen.add(k); }
+            }
+            for (const k of Object.keys(props)) {
+                if (!seen.has(k)) { ordered.push(k); }
+            }
+
+            const protectedProps = [];
+            const editableEntries = [];
+            for (const k of ordered) {
+                const v = props[k];
+                if (READONLY_KEYS.includes(k)) {
+                    if (k !== 'id') protectedProps.push([k, v]);
+                } else {
+                    editableEntries.push([k, v]);
+                }
+            }
+
+            let html = `<h3>节点属性</h3>
+                <label>雪花 ID</label><input value="${escHtml(String(props.id || n.data?.snowflakeId || n.id))}" readonly />
+                <label>图内 ID</label><input value="${escHtml(String(n.id))}" readonly style="font-size:0.7rem;color:var(--text-dim);" />
+                <label>标签</label><input value="${escHtml(n.data?.labelType || '')}" readonly />
+                ${protectedProps.map(([k,v]) => `
+                <label>${escHtml(k)}</label><input id="detail_${k}" value="${escHtml(String(v ?? ''))}" ${k === 'name' ? '' : 'readonly style="background:rgba(255,255,255,0.02);cursor:not-allowed;"'} />
+                `).join('')}
+                <label style="display:flex;justify-content:space-between;align-items:center;margin-top:0.6rem;">
+                    属性编辑 <button onclick="addPropRow()" style="font-size:0.7rem;padding:0.1rem 0.4rem;">＋ 添加属性</button>
+                </label>
+                <div id="propRows">
+                    ${editableEntries.map(([k,v], i) =>
+            `<div style="display:flex;gap:0.3rem;margin-bottom:0.3rem;">
+                            <input id="propKey${i}" placeholder="属性名" value="${escHtml(k)}" style="flex:1;min-width:0;" />
+                            <input id="propVal${i}" placeholder="值" value="${escHtml(String(v))}" style="flex:1;min-width:0;" />
+                            <button onclick="removePropRow(this)" style="flex:0 0 auto;font-size:0.7rem;padding:0.1rem 0.4rem;">✕</button>
+                         </div>`).join('')}
+                </div>
+                <div style="height:1px;background:rgba(255,255,255,0.05);margin:0.6rem 0;"></div>
+                <div id="historySection">
+                    <h4 style="font-size:0.8rem;color:var(--accent);margin-bottom:0.4rem;">📜 历史版本</h4>
+                    <div style="font-size:0.7rem;color:var(--text-dim);text-align:center;padding:0.5rem;">加载中...</div>
+                </div>
+                <div style="height:1px;background:rgba(255,255,255,0.05);margin:0.6rem 0;"></div>
+                <div class="btn-row">
+                    <button onclick="updateNode('${n.id}')">💾 更新</button>
+                    <button onclick="deleteSelected()" style="border-color:#ef4444;color:#ef4444;">删除</button>
+                </div>`;
+            return html;
+        };
+
+        s.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);"><div class="ot-spinner" style="margin:0 auto 0.6rem;"></div>加载节点属性...</div>';
+        (async () => {
+            let fieldOrder = null;
+            const ontType = props.ont_type;
+            if (ontType) {
+                try {
+                    const fields = await fetchInheritedFields(ontType);
+                    if (fields && fields.length) fieldOrder = fields.map(f => f.code);
+                } catch (_) {}
+            }
+            s.innerHTML = renderNodeDetail(props, fieldOrder);
+            loadNodeHistory(n.id);
+        })();
+        return;
+    }
+
+    // 场景管理
+    if (sidebarMode === 'sceneManager') {
+        s.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-dim);"><div class="ot-spinner" style="margin:0 auto 0.6rem;"></div>加载场景列表...</div>';
+        renderSceneManager();
+        return;
+    }
+}
+
+// ====================================================================
+// 关系属性 — 增加边属性 & 动态编辑
+// ====================================================================
+
+const STandARD_EDGE_PROPS = [
+    { key: 'actionType',     value: 'inference', desc: '路由标识：inference=推理机逻辑判断边属性' },
+    { key: 'required',       value: 'true',      desc: '阻断控制：校验失败时是否强制中断 (true/false)' },
+    { key: 'validationType', value: 'Strong',   desc: '规则级别：Strong 强校验阻断 / Weak 弱校验提醒' },
+    { key: 'ruleId',         value: '',          desc: '规则本体ID' },
+    { key: 'func',           value: '',          desc: '动态函数编码' },
+    { key: 'id',             value: '',          desc: '目标本体' },
+    { key: 'msg',            value: '',          desc: '作用说明' },
+    { key: 'synonym',        value: '',          desc: '同义词：用于语义匹配和模糊查询' },
+    { key: 'queryVariant',   value: '',          desc: '错意词/变体词：用于容错查询' },
+];
+
+function addEdgePropRow(key, val, placeholder) {
+    const container = document.getElementById('edgePropsContainer');
+    if (!container) return;
+    placeholder = placeholder || '属性值';
+    const row = document.createElement('div');
+    row.className = 'edge-prop-row';
+    row.style.cssText = 'display:flex;gap:0.3rem;margin-bottom:0.3rem;align-items:center;';
+    row.innerHTML = `
+        <input type="text" class="ep-key" value="${escHtml(key||'')}" placeholder="属性名" style="flex:1;font-size:0.72rem;padding:0.25rem 0.4rem;background:rgba(0,212,255,0.04);border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;" />
+        <span style="color:var(--text-dim);font-size:0.6rem;">=</span>
+        <input type="text" class="ep-val" value="${escHtml(val||'')}" placeholder="${escHtml(placeholder)}" style="flex:2;font-size:0.72rem;padding:0.25rem 0.4rem;background:rgba(0,212,255,0.04);border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;" />
+        <button onclick="this.closest('.edge-prop-row').remove()" style="font-size:0.6rem;padding:0.15rem 0.35rem;border:1px solid rgba(239,68,68,0.3);border-radius:3px;background:transparent;color:#ef4444;cursor:pointer;" title="移除">✕</button>`;
+    container.appendChild(row);
+}
+
+function resetEdgeProps() {
+    const container = document.getElementById('edgePropsContainer');
+    if (!container) return;
+    container.innerHTML = '';
+    STandARD_EDGE_PROPS.forEach(p => addEdgePropRow(p.key, p.value, p.desc));
+}
+
+async function saveEdgeProps(edgeId) {
+    const properties = {};
+    const rows = document.querySelectorAll('#edgePropsContainer .edge-prop-row');
+    rows.forEach(row => {
+        const key = row.querySelector('.ep-key')?.value?.trim();
+        const val = row.querySelector('.ep-val')?.value?.trim();
+        if (key) { properties[key] = val; }
+    });
+
+    const newType = document.getElementById('viewEdgeType')?.value?.trim();
+    const oldType = selectedEdge?.data?.type || selectedEdge?.data?.label || selectedEdge?.label || '';
+
+    try {
+        // 先保存属性
+        await api('/edges/' + edgeId, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ properties }) });
+
+        // 如果关系类型变了，删除旧边重建（Memgraph 不支持直接改名）
+        if (newType && newType !== oldType && selectedEdge) {
+            const srcId = Number(selectedEdge.source);
+            const tgtId = Number(selectedEdge.target);
+            await api('/edges/' + edgeId, { method: 'DELETE' });
+            await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: srcId, target_id: tgtId, rel_type: newType, properties }) });
+        }
+
+        closeSidebar();
+        if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
+    } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+function switchToInsertNode() {
+    sidebarMode = 'insert-node';
+    renderSidebar();
+}
+
+function deleteEdgeConfirm(edgeId) {
+    if (!confirm('确定删除该连线？')) return;
+    api('/edges/' + edgeId, { method: 'DELETE' }).then(() => {
+        closeSidebar();
+        if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
+    }).catch(e => alert('删除失败: ' + e.message));
 }
 
 async function onOntTypeChange() {
@@ -856,15 +966,13 @@ async function onOntTypeChange() {
             container.innerHTML = '<div style="color:var(--text-dim);font-size:0.75rem;">该类型无定义字段</div>';
             return;
         }
-        // 更新标签为对应图数据库 label
+        // 自动填标签为对应图数据库 label
         const types = _ontTypesCache || [];
         const selType = types.find(t => t.id === modelId);
         const labelEl = document.getElementById('newLabel');
         if (labelEl && selType) {
             const mapped = ONT_TYPE_LABEL_MAP[selType.type_code] || 'Entity';
-            for (const opt of labelEl.options) {
-                if (opt.value === mapped) { labelEl.value = mapped; break; }
-            }
+            labelEl.value = mapped;
         }
 
         let html = '<div class="tech-line" style="margin:0.3rem 0;"></div>';
@@ -933,9 +1041,12 @@ async function updateNode(id) {
 
     const props = {};
     // 保留受保护字段不变
-    for (const key of ['id', 'name', 'code', 'type', 'create_time', 'update_time']) {
+    for (const key of ['id', 'code', 'type', 'create_time', 'update_time']) {
         if (oldProps[key] !== undefined) props[key] = oldProps[key];
     }
+    // name 可编辑，从 protected 区域读取
+    const nameEl = document.getElementById('detail_name');
+    props.name = nameEl?.value?.trim() || oldProps.name;
     if (!props.name) { alert('名称不能为空'); return; }
 
     // 收集动态属性

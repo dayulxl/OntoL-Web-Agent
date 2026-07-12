@@ -3,6 +3,7 @@
 -------
 Jinja2 模板渲染和静态文件服务。（模板文件位于 webAPP/templates/）
 """
+import json as _json
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -111,13 +112,103 @@ async def workflow_detail(request: Request, name: str):
     })
 
 
+def _build_ontology_tree_for_view() -> list:
+    """从 SQLite ontol_model / ontol_model_attr 表加载本体类型，输出 js-treeview 格式。"""
+    import sqlite3
+    from pathlib import Path as _Path
+
+    db_path = _Path("infrastructure/db/ontol.db")
+    if not db_path.exists():
+        return []
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        models = conn.execute(
+            "SELECT id, name, ontol_parent_id AS parent_id, ontol_model_type AS type_code, "
+            "ontol_model_desc AS desc FROM ontol_model WHERE delete_flag='0' ORDER BY id"
+        ).fetchall()
+        attrs = conn.execute(
+            "SELECT ontol_model_id, code FROM ontol_model_attr "
+            "WHERE delete_flag='0'"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not models:
+        return []
+
+    # 统计每个模型的字段数
+    attr_counts: dict[str, int] = {}
+    for a in attrs:
+        mid = a["ontol_model_id"]
+        attr_counts[mid] = attr_counts.get(mid, 0) + 1
+
+    # 构建 types dict
+    types: dict[str, dict] = {}
+    for m in models:
+        types[m["id"]] = {
+            "id": m["id"],
+            "parent_id": m["parent_id"],
+            "name": m["name"],
+            "type_code": m["type_code"] or "",
+            "desc": (m["desc"] or "").strip(),
+            "field_count": attr_counts.get(m["id"], 0),
+        }
+
+    def build_node(type_id: str) -> dict:
+        t = types[type_id]
+        node = {
+            "name": _fmt_node_name(t),
+            "id": t["id"],
+            "typeCode": t["type_code"],
+            "fieldCount": t["field_count"],
+            "desc": t["desc"],
+            "children": [],
+        }
+        # 找直接子节点
+        child_ids = sorted(
+            [cid for cid, ct in types.items()
+             if ct.get("parent_id") == type_id and cid != type_id],
+            key=lambda x: types[x]["name"]
+        )
+        for cid in child_ids:
+            node["children"].append(build_node(cid))
+        if not node["children"]:
+            node.pop("children")  # leaf → select 事件触发
+        return node
+
+    def _fmt_node_name(t: dict) -> str:
+        fc = t["field_count"]
+        parts = [t["id"]]
+        if t["name"] and t["name"] != t["id"]:
+            parts.append(f"({t['name']})")
+        if fc > 0:
+            parts.append(f"[{fc}字段]")
+        return " ".join(parts)
+
+    # 找根节点
+    roots = []
+    for tid, t in types.items():
+        parent_id = t.get("parent_id")
+        if not parent_id or parent_id not in types or parent_id == tid:
+            node = build_node(tid)
+            node["expanded"] = True
+            roots.append(node)
+
+    return roots
+
+
 @router.get("/ontology-template", response_class=HTMLResponse)
 async def ontology_template_page(request: Request):
     ctx = request_context.get()
+    tree = _build_ontology_tree_for_view()
+    ontology_tree_json = _json.dumps(tree, ensure_ascii=False, default=str)
     return _render("pages/ontology_template.html", {
         "request": request,
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),
+        "ontology_tree_json": ontology_tree_json,
     })
 
 

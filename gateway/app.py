@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from gateway.routes import langgraph_routes, page_routes, chat_routes, ontology_routes
+from gateway.routes import langgraph_routes, page_routes, chat_routes, ontology_routes, datamanage_routes
 from gateway.middleware.auth import AuthMiddleware
 from gateway.middleware.logging import LoggingMiddleware
 from gateway.middleware.rate_limiter import RateLimiterMiddleware
@@ -31,16 +31,16 @@ def create_app() -> FastAPI:
 
         logger = get_logger(__name__)
 
-        # ── Neo4j ──
+        # ── 图数据库（Memgraph / Neo4j）──
         try:
             await create_driver(
                 uri=settings.neo4j_uri,
                 user=settings.neo4j_user,
-                password=settings.neo4j_password or "neo4j",
+                password=settings.neo4j_password or "",
             )
-            logger.info("Neo4j driver initialized", extra={"uri": settings.neo4j_uri})
+            logger.info("Graph DB driver initialized", extra={"uri": settings.neo4j_uri})
         except Exception as e:
-            logger.warning("Neo4j driver init failed — ontology API will be unavailable", extra={"error": str(e)})
+            logger.warning("Graph DB driver init failed — ontology API will be unavailable", extra={"error": str(e)})
 
         # ── SQLite ──
         await create_sqlite_db()
@@ -55,7 +55,7 @@ def create_app() -> FastAPI:
         title="LangGraph Cluster Gateway",
         description="面向集群部署的 LangChain/LangGraph 智能服务网关",
         version="1.0.0",
-        docs_url="/docs" if settings.debug else None,
+        docs_url="/api-docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
         lifespan=lifespan,
     )
@@ -78,10 +78,12 @@ def create_app() -> FastAPI:
     app.include_router(langgraph_routes.router, prefix="/api/v1")
     app.include_router(chat_routes.router, prefix="/api/v1")
     app.include_router(ontology_routes.router, prefix="/api/v1")
+    app.include_router(datamanage_routes.router, prefix="/api/v1")
+
 
     # 页面路由 & 静态文件
     app.include_router(page_routes.router)
-    app.mount("/static", StaticFiles(directory="gateway/static"), name="static")
+    app.mount("/static", StaticFiles(directory="webAPP/static"), name="static")
 
     return app
 

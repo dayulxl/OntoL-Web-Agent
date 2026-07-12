@@ -115,15 +115,22 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 置信度滑块 + toggle 开关，全局阈值控制推理命中概率
 
 ### 本体语义 (/ontology-template)
-- 左树（递归 CTE）右详情布局
+- 左侧 **js-treeview** (justinchmura/js-treeview) 树形导航，从 `ontol_model` + `ontol_model_attr` 表直接加载
+- 后端 `page_routes._build_ontology_tree_for_view()` 输出 `[{name, id, typeCode, fieldCount, children, expanded}]` 格式
+- 点击树节点名 → 右侧加载模型详情（基本信息 + 预置字段表格 + 自定义字段表格）
 - 字段分为「系统预设」（`attr_is_system='1'`，🔒不可删改）和「自定义字段」
 - 前端表格禁编辑 + 后端 PUT/DELETE 403 保护
+- 工具栏：📂全部展开 / 📁全部折叠 / 🔍搜索过滤
+- 静态资源：`webAPP/static/js-treeview.{js,css}`
 
 ### 本体建模 (/ontology)
 - ReactFlow 图可视化 + 侧边栏节点/关系 CRUD + 边上插入节点
 - 工具栏场景管理（卡片式 UI + 弹窗多选，系统预设场景受保护）
 - 节点创建/更新/删除 + 关系创建/删除 → 自动写 `ontol_data_his` + 递增图节点 `version` 版本号
 - 点击节点侧边栏显示「📜 历史版本」— 点击每条可弹窗查看变更前后对比
+- **边属性**：创建关系时自动预填 9 个标准边属性（actionType/required/validationType/ruleId/func/id/msg/synonym/queryVariant），支持动态增删自定义属性
+- 点击画布上的边 → 查看/编辑边属性（`PUT /ontology/edges/{edge_id}`），仅显示有值的属性；可切换到「边上插入节点」模式
+- 关系类型为自由输入框（非下拉）
 
 ### 文件上传 & 导入 (/upload)
 - LLM 解析文本 → 本体类型识别 + 字段填充
@@ -144,6 +151,62 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 默认工具名 `infer_forward`，也可调用 `validate`, `check_rule`, `expand`
 - **副本节点 ID 规则**：推理机创建副本节点时，节点 ID 必须为 `{原节点ID}-{副本编码}`（如 `node_12345-V1.0`），确保图内全局唯一
 - **图节点/边 Snowflake ID**：Memgraph 中所有节点和边的 `id` 使用 **Snowflake 算法** 生成 **64 位纯数字整数**（int64，不转字符串）；导入时 `SnowflakeGenerator` 先查询已有 ID 去重，再将 LLM 随机字符串 ID 替换为纯数字 Snowflake ID，相同随机串映射到相同 Snowflake ID
+
+### 本体前缀规范
+
+所有本体语义体系中的编码前缀，用于区分不同作用域的属性和关系类型。
+
+| 序号 | 作用域 | 名称 | 编码前缀 | 格式示例 | 备注 |
+|------|--------|------|----------|----------|------|
+| 1 | 对象属性 | RDFS 语言 | `rdfs:` | | 也支持 RDFS 核心常量，不写前缀 |
+| 2 | 对象属性 | OWL2 DL 语言 | `owl2:` | | OWL2 DL 语言为主 |
+| 3 | 对象属性 | SWRL 语言 | `swrl:` | | SWRL 语法 |
+| 4 | 对象属性 | SHACL 语言 | `sh:` | | SHACL 语法 |
+| 5 | 对象属性 | 规则设定 | `rule:` | `rule:forwardChain` / `rule:backwardChain` | 默认就是前链推理 |
+| 6 | 对象属性 | 自定义动态函数 | `func:` | `{"id":"图ID","func":"函数名"}` | 不对接大模型，用 JSON 调用函数实现 |
+| 7 | 对象属性/程序属性 | JSONPath | `$.` | `$.node1.node1-1` | 符合 RFC 9535 标准 |
+| 8 | 边类型 | 路径标识 | `actionType:` | `actionType: "inference"` | 路由标识：指定执行分支。`inference`=走推理机逻辑判断边属性；其他值=大模型关系，不走推理机 |
+| 9 | 边属性 | 自定义动作接口 | 边的 Key-Value | 见下方 | |
+
+**边属性规范 (Memgraph Key-Value)**：边属性仅支持标量类型，不支持嵌套 JSON/Map。标准边属性定义 `STandARD_EDGE_PROPS`（见 `ontology.html`）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `actionType` | string | 路由标识（如 `inference` 走推理机） |
+| `required` | bool | 阻断控制（`true`/`false`） |
+| `validationType` | string | 规则级别：`Strong` 强校验阻断 / `Weak` 弱校验提醒不阻断 |
+| `ruleId` | string | 规则本体ID |
+| `func` | string | 动态函数编码 |
+| `id` | string | 目标本体 |
+| `msg` | string | 作用说明 |
+| `synonym` | string | 同义词，用于语义匹配 |
+| `queryVariant` | string | 错意词/变体词，用于容错查询 |
+
+## 编码规范
+
+### 写代码前必须做的事
+
+1. **完整阅读所有涉及文件** — 不是 grep 关键行，是 Read 完整文件内容
+2. **理解关联函数** — 找清所有调用链、全局变量、CSS 类和 DOM ID 的依赖关系
+3. **检查冲突** — 写之前确认：
+   - 无函数重名（全文件搜索 `function X(` 和 `async function X(`）
+   - 无变量重复声明（`const`/`let`/`var` 同名）
+   - 无 CSS 类名冲突
+   - 无 DOM ID 冲突
+   - 无 API 路由冲突
+
+### 写代码后必须做的事
+
+1. **检查括号/大括号平衡** — 用脚本验证 script 块内 `{` `}` 数量相等
+2. **检查函数定义次数** — 每个函数在文件中只定义一次
+3. **检查全局变量** — 同一作用域 `const`/`let`/`var` 不重复声明
+
+### 发现冲突时的处理
+
+- **必须提醒用户**，说明冲突的具体位置和性质
+- **禁止擅自写补偿代码** — 不能静默写额外的修复/桥接代码绕开冲突，用户必须知晓并决定
+
+相关内存：[[warn-on-code-conflict]] [[read-all-code-before-writing]]
 
 ## 设计原则
 

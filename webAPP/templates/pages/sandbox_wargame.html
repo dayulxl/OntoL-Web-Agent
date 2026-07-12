@@ -16,14 +16,17 @@ footer { display: none; }
 
 #root { width: 100%; height: calc(100vh - 60px); }
 
+/* ReactFlow 节点去掉默认内边距 */
+.react-flow__node { padding: 0 !important; }
+
 /* 节点按标签着色 — 军演/推演暖色系 */
-.node-Entity { background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
-.node-Individual { background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
-.node-Class { background: rgba(59, 130, 246, 0.12); border: 2px solid rgba(59, 130, 246, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
-.node-Property { background: rgba(16, 185, 129, 0.12); border: 2px solid rgba(16, 185, 129, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
-.node-Patrol { background: rgba(239, 68, 68, 0.12); border: 2px solid rgba(239, 68, 68, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
-.node-Type { background: rgba(139, 92, 246, 0.12); border: 2px solid rgba(139, 92, 246, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
-.node-default { background: rgba(20, 28, 16, 0.8); border: 2px solid rgba(245, 158, 11, 0.18); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Entity { background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Individual { background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Class { background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.45); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Property { background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Patrol { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.45); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Type { background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.45); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-default { background: rgba(20, 28, 16, 0.8); border: 1px solid rgba(245, 158, 11, 0.18); border-radius: 6px; color: #f5f0e0; font-size:12px; text-align: center; }
 
 /* 工具栏 — 浮动在左上 (军演暖色系) */
 .toolbar { position: fixed; top: 60px; left: 0; right: 0; z-index: 10; display: flex; gap: 0.4rem; padding: 0.4rem 1rem; background: rgba(12, 18, 10, 0.94); border-bottom: 1px solid rgba(245, 158, 11, 0.25); align-items: center; flex-wrap: wrap; backdrop-filter: blur(8px); }
@@ -68,11 +71,11 @@ footer { display: none; }
 .toggle-switch input:checked + .toggle-slider::before { background: #f59e0b; transform: translateX(16px); }
 
 /* 侧边栏 — 军演暖色系 */
-.sidebar { position: fixed; right: 0; top: 60px; width: 340px; height: calc(100vh - 60px); background: rgba(12, 18, 10, 0.97); border-left: 1px solid rgba(245, 158, 11, 0.25); overflow-y: auto; z-index: 100; padding: 1.2rem; backdrop-filter: blur(12px); display: none; }
+.sidebar { position: fixed; right: 0; top: 60px; width: 280px; height: calc(100vh - 60px); background: rgba(12, 18, 10, 0.97); border-left: 1px solid rgba(245, 158, 11, 0.25); overflow-y: auto; z-index: 100; padding: 0.8rem; backdrop-filter: blur(12px); display: none; }
 .sidebar.open { display: block; }
 .sidebar h3 { color: #f59e0b; margin-bottom: 1rem; font-size: 1rem; }
 .sidebar label { display: block; font-size: 0.75rem; color: #9ca18c; margin-bottom: 0.15rem; margin-top: 0.4rem; }
-.sidebar input, .sidebar textarea, .sidebar select { width: 100%; margin-bottom: 0.3rem; font-size: 0.8rem; }
+.sidebar input, .sidebar textarea, .sidebar select { width: 100%; margin-bottom: 0.3rem; font-size: 0.8rem; padding: 0.25rem 0.4rem; }
 .sidebar .props-table { width: 100%; font-size: 0.78rem; }
 .sidebar .props-table td { padding: 0.25rem 0.3rem; border-bottom: 1px solid rgba(245, 158, 11, 0.15); color: #d4d0c0; }
 .sidebar .btn-row { display: flex; gap: 0.4rem; margin-top: 0.8rem; }
@@ -244,14 +247,15 @@ const LABEL_NAMES = {
 
 function toFlowNode(n) {
     const label = n.labels?.[0] || 'default';
-    const name = n.properties?.name || n.properties?.title || '#' + n.id;
+    const name = n.properties?.name || n.properties?.title || '#' + (n.properties?.id || n.id);
+    const snowflakeId = n.properties?.id;
     const x = n.properties?._x != null ? n.properties._x : Math.random() * 500 + 50;
     const y = n.properties?._y != null ? n.properties._y : Math.random() * 400 + 50;
     return {
         id: String(n.id),
         type: 'default',
         position: { x, y },
-        data: { label: name, labelType: label, props: n.properties },
+        data: { label: name, labelType: label, props: n.properties, snowflakeId: snowflakeId },
         className: LABEL_COLORS[label] ? 'node-' + label : 'node-default',
         style: { borderColor: LABEL_COLORS[label] || '#9ca18c' },
     };
@@ -262,13 +266,16 @@ function toFlowEdges(nodes) {
     for (const n of nodes) {
         if (!n.relationships) continue;
         for (const r of n.relationships) {
-            const key = n.id + '-' + r.target_id + '-' + r.type;
+            // 使用图数据库返回的实际方向 (source_id → target_id)
+            const src = String(r.source_id ?? n.id);
+            const tgt = String(r.target_id ?? r.related_id);
+            const key = src + '-' + tgt + '-' + r.type;
             if (seen.has(key)) continue;
             seen.add(key);
             edges.push({
                 id: String(r.edge_id || key),
-                source: String(n.id),
-                target: String(r.target_id),
+                source: src,
+                target: tgt,
                 type: 'smoothstep',
                 label: r.type,
                 markerEnd: { type: 'arrowclosed', color: '#9ca18c' },
@@ -299,10 +306,12 @@ if (!ReactFlow) {
 
 function makeNodeComponent(label, color) {
     return function NodeComp({ data }) {
-        return React.createElement('div', { style: { borderColor: color } },
-            React.createElement('div', { style: { fontWeight: 600, fontSize: 13 } }, data.label),
+        return React.createElement('div', {
+                style: { borderColor: color, padding: '3px 6px', borderRadius: 4, maxWidth: 160, wordBreak: 'break-all' }
+            },
+            React.createElement('div', { style: { fontWeight: 600, fontSize: 12, maxWidth: 148, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, data.label),
             data.props?.code &&
-                React.createElement('div', { style: { fontSize: 10, color: '#9ca18c', marginTop: 2 } }, data.props.code)
+                React.createElement('div', { style: { fontSize: 9, color: '#9ca18c', marginTop: 1 } }, data.props.code)
         );
     };
 }
@@ -336,7 +345,7 @@ function renderApp() {
                 const es = toFlowEdges(nodeData);
                 setNodes(ns);
                 setEdges(es);
-                setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2 }), 300);
+                setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.3, maxZoom: 1.5 }), 300);
             }).catch(e => {
                 rfContainer.innerHTML = `<div style="color:#f59e0b;padding:2rem;text-align:center;">
                     <p>❌ 推演数据加载失败</p><p style="font-size:0.8rem;color:#9ca18c;">${e.message}</p>
@@ -411,6 +420,9 @@ function renderApp() {
             onPaneClick,
             nodeTypes,
             fitView: true,
+            fitViewOptions: { padding: 0.3, maxZoom: 1.5 },
+            minZoom: 0.1,
+            maxZoom: 3,
             style: { background: 'transparent' },
             defaultEdgeOptions: {
                 type: 'smoothstep',
@@ -459,7 +471,7 @@ document.addEventListener('keydown', function(e) {
 // ====================================================================
 // 全局函数 (工具栏 + 侧边栏)
 // ====================================================================
-function fitView() { rfInstance?.fitView({ padding: 0.2 }); }
+function fitView() { rfInstance?.fitView({ padding: 0.3, maxZoom: 1.5, duration: 300 }); }
 
 const INFER_URL = '/api/v1/tools/call';
 
@@ -872,14 +884,16 @@ async function loadNeighborhood(nodeId) {
                         seenIds.add(nid);
                         queue.push(nid);
                     }
-                    // 收集边
+                    // 收集边（使用图数据库返回的实际方向）
                     if (nb.edge) {
-                        const ekey = String(nb.edge.id || (cid + '-' + nid + '-' + nb.edge.type));
+                        const esrc = String(nb.edge.source_id ?? cid);
+                        const etgt = String(nb.edge.target_id ?? nid);
+                        const ekey = String(nb.edge.id || (esrc + '-' + etgt + '-' + nb.edge.type));
                         if (!edgeMap[ekey]) {
                             edgeMap[ekey] = {
                                 id: ekey,
-                                source: cid,
-                                target: nid,
+                                source: esrc,
+                                target: etgt,
                                 type: 'smoothstep',
                                 label: nb.edge.type,
                                 markerEnd: { type: 'arrowclosed', color: '#9ca18c' },
@@ -901,7 +915,7 @@ async function loadNeighborhood(nodeId) {
             const centerName = nodeMap[nodeId]?.properties?.name || nodeMap[nodeId]?.properties?.title || '#' + nodeId;
             document.getElementById('nodeCount').textContent =
                 `实体: ${allNodes.length} | 关系: ${allEdges.length} (子图: ${centerName})`;
-            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 150);
+            setTimeout(() => rfInstance?.fitView({ padding: 0.3, maxZoom: 1.5, duration: 400 }), 150);
         }
     } catch (e) { console.error('邻域查询失败:', e); }
 }
@@ -928,7 +942,7 @@ async function searchNodes() {
             _setEdges(es);
             document.getElementById('nodeCount').textContent =
                 `实体: ${ns.length} | 关系: ${es.length} (搜索: ${kw})`;
-            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 100);
+            setTimeout(() => rfInstance?.fitView({ padding: 0.3, maxZoom: 1.5, duration: 400 }), 100);
         }
     } catch (e) { alert('搜索失败: ' + e.message); }
 }
@@ -951,7 +965,7 @@ async function loadAndRender() {
             _setEdges(es);
             document.getElementById('nodeCount').textContent =
                 `实体: ${schema.node_count || ns.length} | 关系: ${schema.edge_count || es.length}`;
-            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 100);
+            setTimeout(() => rfInstance?.fitView({ padding: 0.3, maxZoom: 1.5, duration: 400 }), 100);
         }
     } catch (e) { alert('加载失败: ' + e.message); }
 }
@@ -1028,10 +1042,12 @@ async function _doExpand(node) {
                     }
 
                     if (nb.edge) {
-                        const ekey = String(nb.edge.id || (parentId + '-' + nid + '-' + nb.edge.type));
+                        const esrc = String(nb.edge.source_id ?? parentId);
+                        const etgt = String(nb.edge.target_id ?? nid);
+                        const ekey = String(nb.edge.id || (esrc + '-' + etgt + '-' + nb.edge.type));
                         if (!edgeSeen.has(ekey)) {
                             edgeSeen.add(ekey);
-                            edgeList.push({ source: str(parentId), target: str(nid), type: nb.edge.type, eid: ekey });
+                            edgeList.push({ source: esrc, target: etgt, type: nb.edge.type, eid: ekey });
                         }
                     }
                 }
