@@ -82,10 +82,13 @@ project-root/
 │   │   ├── ontology_routes.py  # Neo4j CRUD + 文件解析导入 + 本体模型
 │   │   └── page_routes.py    # Jinja2 页面渲染
 │   ├── templates/pages/      # 前端页面
-│   │   ├── chat.html         # AI 对话页（管道步骤指示器 + 工具调用卡片）
+│   │   ├── chat.html         # AI 对话页（管道步骤指示器 + 工具调用卡片 + 副本选择）
+│   │   ├── sandbox_wargame.html # 沙盘推演（ReactFlow + 推演副本 + 有向图布局 + 推理机调用）
 │   │   ├── upload.html       # 文件上传 & 本体解析导入
 │   │   └── index.html        # 态势总览（Neo4j 态势图）
 │   ├── static/               # 静态资源
+│   │   └── js/
+│   │       └── graph-layout.js # 有向图布局引擎（source左target右）
 │   └── middleware/            # 中间件（鉴权、限流、日志）
 ├── capabilities/             # LangChain 能力层
 │   ├── agents/
@@ -97,6 +100,7 @@ project-root/
 │   │   └── knowledge_graph.py # 外部 KG 工具动态注册
 │   ├── memory/
 │   │   └── graph_memory.py   # Neo4j 图记忆（CRUD / Schema / 遍历）
+│   ├── graph_reasoner/       # 🆕 图推理引擎 — 推理机协调者
 │   └── models/
 │       ├── factory.py        # 模型工厂（7种类型 × 4提供商）
 │       ├── models.yaml       # 模型定义配置
@@ -178,6 +182,23 @@ project-root/
 
 通过 `capabilities/models/models.yaml` 配置，环境变量注入 API Key。
 
+### 沙盘推演 & 推演副本 🆕
+
+`http://localhost:8000/sandbox-wargame` 提供基于 ReactFlow 的图编辑 + 推演能力：
+
+| 功能 | 说明 |
+|------|------|
+| 图编辑 | 节点/关系 CRUD，ReactFlow 拖拽交互 |
+| 有向图布局 | source(上游)放左边，target(下游)放右边，BFS 递归排列 |
+| 推演副本模式 | URL `?id={cope_id}` 进入，图数据按 `cope_version` 隔离 |
+| 调用推理机 | 推演模式下点击「推演」→ `POST /tools/call {infer_on_nodes_id}` → 状态自动更新 |
+| 重置 | 根据 `graph_id` 用原节点数据覆盖副本节点 |
+| 置信度 | 页面滑块控制，推演时传入推理机，联动副本表 `confidence` 字段 |
+
+**副本状态机**: `00 待处理` → `01 推理中` → `02 推理完成` / `03 已删除`
+
+**图数据查询**: status=00 → 查无 `cope_version` 属性的原始节点；status≠00 → 查 `cope_version={id}` 的副本节点
+
 ## API 端点
 
 ### 知识图谱 (Neo4j) — `/api/v1/ontology`
@@ -228,6 +249,25 @@ project-root/
 |------|------|------|
 | **POST** | **`/chat`** | **SSE 流式对话（多步推理管道 + 工具调用）** |
 
+### 推演副本管理 🆕 — `/api/v1/cope-versions`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/cope-versions` | 查询所有有效副本 |
+| POST | `/cope-versions` | 新增副本 |
+| PUT | `/cope-versions/{id}` | 更新副本（名称/状态/置信度等） |
+| DELETE | `/cope-versions/{id}` | 软删除副本 |
+| GET | `/cope-versions/{id}/graph` | 获取副本图数据（节点+关系，status决定查询条件） |
+| DELETE | `/cope-versions/{id}/nodes` | 删除副本对应的 Memgraph 节点 |
+
+### 对话-副本绑定 🆕 — `/api/v1/chat-cope-versions`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/chat-cope-versions/bind` | 绑定对话到副本（先删旧再插新） |
+| GET | `/chat-cope-versions/{chat_id}` | 查询对话绑定的副本（JOIN 副本名+状态） |
+| DELETE | `/chat-cope-versions/{id}` | 软删除绑定 |
+
 ### LangGraph 工作流 — `/api/v1`
 
 | 方法 | 路径 | 说明 |
@@ -251,7 +291,7 @@ project-root/
 | `CUSTOM_LLM_BASE_URL` | 自定义 LLM 端点 | `https://api.deepseek.com/v1` |
 | `CUSTOM_LLM_API_KEY` | 自定义 LLM Key | DeepSeek API Key |
 | `DEFAULT_MODEL` | 默认 LLM 模型 | `deepseek-v4-pro` |
-| `KG_SERVER_URL` | 外部推理机地址 | `http://192.168.56.1:8085` |
+| `KG_SERVER_URL` | 外部推理机地址 | `http://localhost:8085` |
 | `POSTGRES_URI` | Postgres 连接（可选） | `postgresql://...` |
 | `REDIS_URI` | Redis 连接 | `redis://localhost:6379/0` |
 | `CELERY_BROKER_URL` | Celery 消息队列 | `redis://localhost:6379/1` |
@@ -271,8 +311,8 @@ poetry run pytest
 | Web 框架 | FastAPI + Uvicorn |
 | AI 编排 | LangGraph (ReAct Agent) |
 | AI 能力 | LangChain |
-| 图数据库 | Neo4j (AuraDB / 自部署) |
-| 本体模型存储 | SQLite (ontol.db) |
+| 图数据库 | Memgraph/Neo4j (Bolt 协议) |
+| 本体模型存储 | SQLite (ontol.db，包含 ontol_cope_version + ontol_chat_cope_version_relation 等表) |
 | 状态存储 | Postgres / SQLite (checkpoint) |
 | 缓存/通信 | Redis |
 | 消息队列 | Celery + Redis |
