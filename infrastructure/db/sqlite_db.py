@@ -234,6 +234,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             id                    TEXT PRIMARY KEY,
             scene_id              TEXT    NOT NULL,
             dictionary_name       TEXT    NOT NULL,
+            dictionary_code       TEXT,
             dictionary_type_id    TEXT,
             dictionary_content    TEXT,
             create_time           TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -253,6 +254,12 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         _conn._exec("ALTER TABLE ontol_scene_dictionary DROP COLUMN dictionary_type")
     if "dictionary_type_id" not in osd_cols:
         _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN dictionary_type_id TEXT")
+    if "dictionary_code" not in osd_cols:
+        _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN dictionary_code TEXT")
+    _conn._exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_osd_code_active "
+        "ON ontol_scene_dictionary(dictionary_code) WHERE delete_flag='0' AND dictionary_code IS NOT NULL AND dictionary_code != ''"
+    )
 
     # ── 词典类型表 ──
     _conn._exec("""
