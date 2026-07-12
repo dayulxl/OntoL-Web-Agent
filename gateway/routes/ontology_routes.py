@@ -2016,8 +2016,8 @@ async def bind_chat_scenes(body: ChatSceneBind):
         for sid in body.scene_ids:
             rid = _uuid.uuid4().hex[:16]
             await _execute_scene(
-                "INSERT INTO ontol_char_scene_relation (id, chat_id, scene_id) VALUES (?,?,?)",
-                (rid, body.chat_id, sid),
+                "INSERT INTO ontol_char_scene_relation (id, scene_id) VALUES (?,?,?)",
+                (rid, body.sid),
             )
         return await get_chat_scenes(body.chat_id)
     except HTTPException:
@@ -2031,7 +2031,7 @@ async def get_chat_scenes(chat_id: str):
     """获取对话绑定的场景列表（带场景名称）。"""
     try:
         rows = await _query_scene(
-            """SELECT r.id, r.chat_id, r.scene_id, s.name, s.scene_desc
+            """SELECT r.id, r.r.scene_id, s.name, s.scene_desc
                FROM ontol_char_scene_relation r
                LEFT JOIN ontol_model_scene s ON r.scene_id = s.id
                WHERE r.chat_id=? AND r.delete_flag='0'
@@ -2779,12 +2779,11 @@ async def delete_function(func_id: str, soft: bool = True):
 
 
 # =========================================================================
-# 推演版本管理 CRUD (ontol_cope_version_relation)
+# 推演版本管理 CRUD (ontol_cope_version)
 # =========================================================================
 
 class CopeVersionCreate(BaseModel):
     name: str = Field(default="", description="副本名称")
-    chat_id: str = Field(default="", description="关联对话ID")
     cope_version_status: str = Field(default="00", description="状态: 00待处理/01推理中/02推理完成/03已删除")
     init_note_id: str = Field(default="", description="初始节点ID")
     init_note_name: str = Field(default="", description="初始节点名称")
@@ -2802,10 +2801,10 @@ class CopeVersionUpdate(BaseModel):
 
 @router.get("/cope-versions")
 async def list_cope_versions():
-    """查询 ontol_cope_version_relation 所有有效记录。"""
+    """查询 ontol_cope_version 所有有效记录。"""
     try:
         rows = await _query_scene(
-            "SELECT * FROM ontol_cope_version_relation WHERE delete_flag='0' ORDER BY create_time DESC"
+            "SELECT * FROM ontol_cope_version WHERE delete_flag='0' ORDER BY create_time DESC"
         )
         return rows
     except Exception as e:
@@ -2821,13 +2820,13 @@ async def create_cope_version(body: CopeVersionCreate):
     now = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     try:
         await _execute_scene(
-            "INSERT INTO ontol_cope_version_relation "
-            "(id, name, code, chat_id, cope_version_status, description, init_note_id, init_note_name, confidence, create_time) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (rid, body.name, rid, body.chat_id, body.cope_version_status,
+            "INSERT INTO ontol_cope_version "
+            "(id, name, code, cope_version_status, description, init_note_id, init_note_name, confidence, create_time) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (rid, body.name, rid, body.cope_version_status,
              body.description, body.init_note_id, body.init_note_name, body.confidence, now),
         )
-        rows = await _query_scene("SELECT * FROM ontol_cope_version_relation WHERE id=?", (rid,))
+        rows = await _query_scene("SELECT * FROM ontol_cope_version WHERE id=?", (rid,))
         return rows[0] if rows else {"id": rid}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Create cope version failed: {e}")
@@ -2845,10 +2844,10 @@ async def update_cope_version(cope_id: str, body: CopeVersionUpdate):
         sets = ", ".join(f"{k}=?" for k in updates)
         params = tuple(updates.values()) + (cope_id,)
         await _execute_scene(
-            f"UPDATE ontol_cope_version_relation SET {sets} WHERE id=?",
+            f"UPDATE ontol_cope_version SET {sets} WHERE id=?",
             params,
         )
-        rows = await _query_scene("SELECT * FROM ontol_cope_version_relation WHERE id=?", (cope_id,))
+        rows = await _query_scene("SELECT * FROM ontol_cope_version WHERE id=?", (cope_id,))
         return rows[0] if rows else {"id": cope_id, "updated": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Update cope version failed: {e}")
@@ -2861,7 +2860,7 @@ async def delete_cope_version(cope_id: str):
     try:
         now = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         await _execute_scene(
-            "UPDATE ontol_cope_version_relation SET delete_flag='1', update_time=? WHERE id=?",
+            "UPDATE ontol_cope_version SET delete_flag='1', update_time=? WHERE id=?",
             (now, cope_id),
         )
         return {"deleted": True, "cope_id": cope_id}
@@ -2893,7 +2892,7 @@ async def get_cope_version(cope_id: str):
     """查询单条副本版本记录。"""
     try:
         rows = await _query_scene(
-            "SELECT * FROM ontol_cope_version_relation WHERE id=? AND delete_flag='0'",
+            "SELECT * FROM ontol_cope_version WHERE id=? AND delete_flag='0'",
             (cope_id,),
         )
         if not rows:
@@ -2917,7 +2916,7 @@ async def get_cope_graph(cope_id: str):
     try:
         # 查副本状态
         rows = await _query_scene(
-            "SELECT * FROM ontol_cope_version_relation WHERE id=? AND delete_flag='0'",
+            "SELECT * FROM ontol_cope_version WHERE id=? AND delete_flag='0'",
             (cope_id,),
         )
         if not rows:
@@ -2997,3 +2996,66 @@ async def get_cope_graph(cope_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Cope graph query failed: {e}")
+
+
+# =========================================================================
+# 对话-推演副本绑定 CRUD (ontol_chat_cope_version_relation)
+# =========================================================================
+
+class ChatCopeVersionBind(BaseModel):
+    chat_id: str = Field(..., description="对话UUID")
+    cope_version_id: str = Field(..., description="副本ID")
+
+
+@router.post("/chat-cope-versions/bind")
+async def bind_chat_cope_version(body: ChatCopeVersionBind):
+    """将对话绑定到推演副本（先删旧绑定，再插入新绑定）。"""
+    import uuid as _uuid
+    rid = _uuid.uuid4().hex[:16]
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        # 先清理旧绑定
+        await _execute_scene(
+            "UPDATE ontol_chat_cope_version_relation SET delete_flag='1' WHERE chat_id=?",
+            (body.chat_id,),
+        )
+        # 插入新绑定
+        await _execute_scene(
+            "INSERT INTO ontol_chat_cope_version_relation (id, name, code, chat_id, cope_version_id, create_time) "
+            "VALUES (?,?,?,?,?,?)",
+            (rid, '', rid, body.chat_id, body.cope_version_id, now),
+        )
+        return {"id": rid, "chat_id": body.chat_id, "cope_version_id": body.cope_version_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bind chat cope version failed: {e}")
+
+
+@router.get("/chat-cope-versions/{chat_id}")
+async def get_chat_cope_version(chat_id: str):
+    """查询对话绑定的推演副本。"""
+    try:
+        rows = await _query_scene(
+            "SELECT r.*, c.name AS cope_name, c.init_note_name, c.cope_version_status "
+            "FROM ontol_chat_cope_version_relation r "
+            "LEFT JOIN ontol_cope_version c ON r.cope_version_id = c.id "
+            "WHERE r.chat_id=? AND r.delete_flag='0'",
+            (chat_id,),
+        )
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query chat cope version failed: {e}")
+
+
+@router.delete("/chat-cope-versions/{relation_id}")
+async def unbind_chat_cope_version(relation_id: str):
+    """删除对话-副本绑定（软删除）。"""
+    try:
+        await _execute_scene(
+            "UPDATE ontol_chat_cope_version_relation SET delete_flag='1' WHERE id=?",
+            (relation_id,),
+        )
+        return {"deleted": True, "relation_id": relation_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unbind chat cope version failed: {e}")

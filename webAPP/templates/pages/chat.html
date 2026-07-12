@@ -685,7 +685,7 @@ async function confirmNewConversation() {
     const copeSel = document.getElementById('copeVersionSelect');
     var selectedCopeId = copeSel ? copeSel.value : '';
 
-    // 如果没有选择推演副本，自动创建一个新的，chat_id 绑定到该副本
+    // 未选择推演副本时自动创建
     if (!selectedCopeId) {
         try {
             var createResp = await fetch('/api/v1/cope-versions', {
@@ -693,7 +693,6 @@ async function confirmNewConversation() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name: '对话副本-' + chat_id.substring(0, 8),
-                    chat_id: chat_id,
                     cope_version_status: '00',
                     description: 'AI对话自动创建',
                 }),
@@ -721,6 +720,17 @@ async function confirmNewConversation() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ chat_id: chat_id, scene_ids: sceneIds }),
+            });
+        } catch (_) {}
+    }
+
+    // 绑定推演副本
+    if (selectedCopeId) {
+        try {
+            await fetch('/api/v1/chat-cope-versions/bind', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chat_id, cope_version_id: selectedCopeId }),
             });
         } catch (_) {}
     }

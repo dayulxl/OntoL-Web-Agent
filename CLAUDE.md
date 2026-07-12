@@ -88,7 +88,8 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
   - `ontol_data_his` — 图数据变更历史（节点 CRUD 自动记录 + 版本号递增）
   - `ontol_datasource` — 数据源配置（MySQL/PG/Oracle 等）
   - `ontol_datasource_type` — 数据源类型（`is_system='1'`=系统预设，不可删改）
-  - `ontol_cope_version_relation` — 🆕 推演副本版本关联表（chat_id + 状态 00/01/02/03 + 初始节点 + 置信度）
+  - `ontol_cope_version` — 🆕 推演副本表（状态 00/01/02/03 + 初始节点 + 置信度）
+  - `ontol_chat_cope_version_relation` — 🆕 对话-副本关联表（chat_id + cope_version_id）
 - **数据主键约定**: 所有表的 `id` 由后端 `uuid.uuid4().hex[:16]` 自动生成，前端表单禁止展示 id 输入框，列表不展示原始 id；`code`/`name` 等仅作业务语义字段
 - **表命名规范**: SQLite 中所有本体语义相关的配置/元数据表必须以 `ontol_` 为前缀
 - **前端按钮布局规范**: 新增按钮放在内容区顶部，必须有可见按钮不含快捷键；编辑/删除按钮：列表行右侧/卡片右上角
@@ -159,7 +160,8 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - **图节点/边 Snowflake ID**：Memgraph 中所有节点和边的 `id` 使用 **Snowflake 算法** 生成 **64 位纯数字整数**（int64，不转字符串）；导入时 `SnowflakeGenerator` 先查询已有 ID 去重，再将 LLM 随机字符串 ID 替换为纯数字 Snowflake ID，相同随机串映射到相同 Snowflake ID
 
 ### 推演副本管理 🆕
-- **表**: `ontol_cope_version_relation` — 副本主键 id + 副本名称 name + 对话ID chat_id + 状态 cope_version_status(00待处理/01推理中/02推理完成/03已删除) + 初始节点 init_note_id/init_note_name + 置信度 confidence + 描述 description
+- **表**: `ontol_cope_version` — 副本主键 id + 副本名称 name + 状态 cope_version_status(00待处理/01推理中/02推理完成/03已删除) + 初始节点 init_note_id/init_note_name + 置信度 confidence + 描述 description
+- **关联表**: `ontol_chat_cope_version_relation` — id + chat_id + cope_version_id（对话↔副本多对一绑定）
 - **API**: `GET/POST/PUT/DELETE /api/v1/cope-versions` + `GET /api/v1/cope-versions/{id}/graph`（副本图数据）+ `DELETE /api/v1/cope-versions/{id}/nodes`（删除副本节点）
 - **图数据查询逻辑**: status=00 → 查无 cope_version 属性的原始节点；status≠00 → 查 cope_version={id} 的副本节点
 - **沙盘推演副本模式**: `?id={cope_id}` 进入推演模式，工具栏显示推演名称+初始节点；点击「推演」→ 调用 `infer_on_nodes_id` 工具；推理成功 → 状态自动变 02

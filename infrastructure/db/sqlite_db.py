@@ -351,11 +351,10 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
 
     # ── 副本版本关联表 ──
     _conn._exec("""
-        CREATE TABLE IF NOT EXISTS ontol_cope_version_relation (
+        CREATE TABLE IF NOT EXISTS ontol_cope_version (
             id                  TEXT PRIMARY KEY,
             name                TEXT    NOT NULL DEFAULT '',
             code                TEXT    NOT NULL DEFAULT '',
-            chat_id             TEXT    NOT NULL DEFAULT '',
             cope_version_status TEXT    NOT NULL DEFAULT '00',
             description         TEXT    NOT NULL DEFAULT '',
             init_note_id        TEXT    NOT NULL DEFAULT '',
@@ -370,6 +369,23 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         )
     """)
 
+    # ── 对话-推演副本关联表 ──
+    _conn._exec("""
+        CREATE TABLE IF NOT EXISTS ontol_chat_cope_version_relation (
+            id                TEXT PRIMARY KEY,
+            name              TEXT    NOT NULL DEFAULT '',
+            code              TEXT    NOT NULL DEFAULT '',
+            chat_id           TEXT    NOT NULL DEFAULT '',
+            cope_version_id   TEXT    NOT NULL DEFAULT '',
+            create_time       TEXT    NOT NULL DEFAULT (datetime('now')),
+            create_user       TEXT    NOT NULL DEFAULT '',
+            update_time       TEXT    NOT NULL DEFAULT '',
+            update_user       TEXT    NOT NULL DEFAULT '',
+            delete_flag       TEXT    NOT NULL DEFAULT '0',
+            is_system         TEXT    NOT NULL DEFAULT '0'
+        )
+    """)
+
     # ═══════════════════════════════════════════════════════════
     # 迁移：补全通用字段 (仅 ADD COLUMN，不做 RENAME)
     # ═══════════════════════════════════════════════════════════
@@ -378,7 +394,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "ontol_scene_dictionary","ontol_dictionary_type","ontol_datasource_type",
         "ontol_datasource","ontol_datasource_log","ontol_scene_dictionary_relation",
         "ontol_llm_config","ontol_llm_type_config","ontol_function_type","ontol_function",
-        "ontol_cope_version_relation",
+        "ontol_cope_version","ontol_chat_cope_version_relation",
     ]
     for tbl in _MIGRATE_TABLES:
         cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
@@ -418,20 +434,20 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         if "code" not in cols:
             _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN code TEXT NOT NULL DEFAULT ''")
 
-    # ── 专项：ontol_cope_version_relation 补充字段 ──
-    ocvr_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_cope_version_relation')")]
+    # ── 专项：ontol_cope_version 补充字段 ──
+    ocvr_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_cope_version')")]
     if "description" not in ocvr_cols:
-        _conn._exec("ALTER TABLE ontol_cope_version_relation ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        _conn._exec("ALTER TABLE ontol_cope_version ADD COLUMN description TEXT NOT NULL DEFAULT ''")
     if "init_note_id" not in ocvr_cols:
-        _conn._exec("ALTER TABLE ontol_cope_version_relation ADD COLUMN init_note_id TEXT NOT NULL DEFAULT ''")
+        _conn._exec("ALTER TABLE ontol_cope_version ADD COLUMN init_note_id TEXT NOT NULL DEFAULT ''")
     if "init_note_name" not in ocvr_cols:
-        _conn._exec("ALTER TABLE ontol_cope_version_relation ADD COLUMN init_note_name TEXT NOT NULL DEFAULT ''")
+        _conn._exec("ALTER TABLE ontol_cope_version ADD COLUMN init_note_name TEXT NOT NULL DEFAULT ''")
     if "name" not in ocvr_cols:
-        _conn._exec("ALTER TABLE ontol_cope_version_relation ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+        _conn._exec("ALTER TABLE ontol_cope_version ADD COLUMN name TEXT NOT NULL DEFAULT ''")
     if "code" not in ocvr_cols:
-        _conn._exec("ALTER TABLE ontol_cope_version_relation ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+        _conn._exec("ALTER TABLE ontol_cope_version ADD COLUMN code TEXT NOT NULL DEFAULT ''")
     if "confidence" not in ocvr_cols:
-        _conn._exec("ALTER TABLE ontol_cope_version_relation ADD COLUMN confidence REAL NOT NULL DEFAULT 0.8")
+        _conn._exec("ALTER TABLE ontol_cope_version ADD COLUMN confidence REAL NOT NULL DEFAULT 0.8")
 
     # ═══════════════════════════════════════════════════════════
     # 索引
@@ -522,8 +538,11 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_del ON ontol_function(delete_flag)")
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_type ON ontol_function(function_type)")
 
-    _conn._exec("CREATE INDEX IF NOT EXISTS idx_ocvr_chat ON ontol_cope_version_relation(chat_id)")
-    _conn._exec("CREATE INDEX IF NOT EXISTS idx_ocvr_del ON ontol_cope_version_relation(delete_flag)")
+    _conn._exec("CREATE INDEX IF NOT EXISTS idx_ocv_del ON ontol_cope_version(delete_flag)")
+
+    _conn._exec("CREATE INDEX IF NOT EXISTS idx_occvr_chat ON ontol_chat_cope_version_relation(chat_id)")
+    _conn._exec("CREATE INDEX IF NOT EXISTS idx_occvr_cope ON ontol_chat_cope_version_relation(cope_version_id)")
+    _conn._exec("CREATE INDEX IF NOT EXISTS idx_occvr_del ON ontol_chat_cope_version_relation(delete_flag)")
 
     # ═══════════════════════════════════════════════════════════
     # 种子数据
