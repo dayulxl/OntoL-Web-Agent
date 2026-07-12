@@ -41,7 +41,16 @@
 #
 # 注册的类必须满足 GraphExtension 协议（通常继承 BaseWorkflowGraph 即可）。
 
-from business.route_planning.graph import RoutePlanningGraph
-from business.strike_decision.graph import StrikeDecisionGraph
+REGISTRY = []
 
-REGISTRY = [RoutePlanningGraph, StrikeDecisionGraph]
+try:
+    from business.route_planning.graph import RoutePlanningGraph
+    REGISTRY.append(RoutePlanningGraph)
+except ImportError:
+    pass
+
+try:
+    from business.strike_decision.graph import StrikeDecisionGraph
+    REGISTRY.append(StrikeDecisionGraph)
+except ImportError:
+    pass

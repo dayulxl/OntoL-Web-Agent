@@ -465,35 +465,49 @@ class InferOnNodesBody(BaseModel):
 
 @router.post("/infer-on-nodes")
 async def infer_on_nodes(body: InferOnNodesBody):
-    """代理转发到 KG 推理机的 /infer-on-nodes-id-fc。"""
-    import requests as req
-    from common.config.settings import get_settings
+    """调用内部图推理机 — 流式收集结果，返回 messages 数组给前端。"""
+    from business.reasoning import run_reasoning
 
-    kg_url = get_settings().kg_server_url
-    try:
-        resp = req.post(
-            f"{kg_url}/infer-on-nodes-id-fc",
-            json={"node_ids": body.node_ids, "confidence": body.confidence, "cope_version": body.cope_version},
-            timeout=300,
-        )
+    # 解析 node_id：支持纯数字 Snowflake ID 或字符串 code
+    async def _resolve_seed_id(raw: str) -> int | None:
         try:
-            data = resp.json()
+            return int(raw)
+        except ValueError:
+            pass
+        # 可能是 code 或名称
+        try:
+            from infrastructure.db.neo4j import get_driver
+            driver = await get_driver()
+            async with driver.session() as session:
+                rec = await session.run(
+                    "MATCH (n) WHERE n.code = $raw OR n.name = $raw "
+                    "RETURN id(n) AS id LIMIT 1", raw=raw)
+                row = await rec.single()
+                return row["id"] if row else None
         except Exception:
-            # NDJSON 格式 → 拆行解析，提取 msg
-            lines = [line.strip() for line in resp.text.strip().split('\n') if line.strip()]
-            msgs = []
-            for line in lines:
-                try:
-                    obj = json.loads(line)
-                    if obj.get("msg"):
-                        msgs.append(obj["msg"])
-                except Exception:
-                    msgs.append(line)
-            data = {"ok": True, "messages": msgs, "raw_text": resp.text}
-        from fastapi.responses import JSONResponse
-        return JSONResponse(content=data, status_code=resp.status_code)
-    except req.RequestException as e:
-        raise HTTPException(status_code=503, detail=f"KG reasoning server unreachable: {e}")
+            return None
+
+    if not body.node_ids:
+        return {"ok": False, "messages": ["❌ 未指定推理节点"]}
+
+    # 取第一个节点作为种子
+    seed_id = await _resolve_seed_id(body.node_ids[0])
+    if seed_id is None:
+        return {"ok": False, "messages": [f"❌ 无法找到节点: {body.node_ids[0]}"]}
+
+    result = await run_reasoning(
+        seed_node_id=seed_id,
+        cope_version=body.cope_version,
+        confidence_threshold=body.confidence,
+    )
+
+    return {
+        "ok": result["error"] is None,
+        "messages": result["log"],
+        "cope_version": result["cope_version"],
+        "clone_count": result["clone_count"],
+        "edges_built": result["edges_built"],
+    }
 
 
 @router.get("/ontology/search")

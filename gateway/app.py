@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from gateway.routes import langgraph_routes, page_routes, chat_routes, ontology_routes, datamanage_routes
+from gateway.routes import langgraph_routes, page_routes, chat_routes, ontology_routes, datamanage_routes, reasoning_routes
 from gateway.middleware.auth import AuthMiddleware
 from gateway.middleware.logging import LoggingMiddleware
 from gateway.middleware.rate_limiter import RateLimiterMiddleware
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_routes.router, prefix="/api/v1")
     app.include_router(ontology_routes.router, prefix="/api/v1")
     app.include_router(datamanage_routes.router, prefix="/api/v1")
+    app.include_router(reasoning_routes.router)
 
 
     # 页面路由 & 静态文件
