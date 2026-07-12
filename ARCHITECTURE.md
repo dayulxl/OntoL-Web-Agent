@@ -516,6 +516,44 @@ CREATE TABLE IF NOT EXISTS ontol_xxx (
 3. **历史命名**：`create_id` → `create_user`，`update_id` → `update_user`，`created_by` → `create_user`
 4. **图数据库（Memgraph）**：仅节点/边属性参照执行，`id` 使用 Snowflake int64，其余字段按 key-value 标量类型存储
 
+#### 8.2.6 关联表专用规范
+
+> 关联表（如 `ontol_*_relation`、`ontol_*_scene_relation`）除 7 个通用字段外，**必须**额外包含 `name` 和 `code` 字段。
+
+| 字段名称 | 数据类型（建议） | 约束条件 | 说明 |
+|----------|-----------------|----------|------|
+| `id` | TEXT | PRIMARY KEY, NOT NULL | UUID，由后端 `uuid.uuid4().hex[:16]` 自动生成 |
+| `name` | TEXT | — | 关联名称 |
+| `code` | TEXT | NOT NULL，本表唯一 | 关联编码，唯一索引 |
+| `create_time` | TEXT | NOT NULL, DEFAULT `(datetime('now'))` | 记录创建时间 |
+| `create_user` | TEXT | NOT NULL, DEFAULT `''` | 创建人标识 |
+| `update_time` | TEXT | NOT NULL, DEFAULT `''` | 最后更新时间 |
+| `update_user` | TEXT | NOT NULL, DEFAULT `''` | 最后更新人标识 |
+| `delete_flag` | INT | NOT NULL, DEFAULT 0 | 逻辑删除（0-未删除，1-已删除） |
+| `is_system` | TEXT | NOT NULL, DEFAULT `'0'` | `'0'`-自定义，`'1'`-系统预设，不可修改 |
+
+**关联表标准 DDL 模板**：
+
+```sql
+CREATE TABLE IF NOT EXISTS ontol_xxx_relation (
+    id            TEXT PRIMARY KEY,
+    -- ... 外键字段 (scene_id, xxx_id 等) ...
+    name          TEXT NOT NULL DEFAULT '',
+    code          TEXT NOT NULL,
+    create_time   TEXT NOT NULL DEFAULT (datetime('now')),
+    create_user   TEXT NOT NULL DEFAULT '',
+    update_time   TEXT NOT NULL DEFAULT '',
+    update_user   TEXT NOT NULL DEFAULT '',
+    delete_flag   INTEGER NOT NULL DEFAULT 0,
+    is_system     TEXT NOT NULL DEFAULT '0',
+    FOREIGN KEY (...) REFERENCES ...
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_xxxrel_code_active
+    ON ontol_xxx_relation(code) WHERE delete_flag = 0;
+```
+
+> ⚠️ **与图数据库（Memgraph）的区别**：本节约束仅适用于 **SQLite 关联表**。Memgraph 中的边属性使用 key-value 标量类型，不在此表设计规范范围内，两者互不冲突。
+
 ### 8.3 Memgraph (图数据库)
 
 - **ID 标准**：所有节点和边的 `id` 属性使用 **Snowflake 算法** 生成 **64 位纯数字整数**（`int64`，不转字符串），结构为 `timestamp(42bit) | datacenter(5bit) | worker(5bit) | sequence(12bit)`，纪元 2020-01-01

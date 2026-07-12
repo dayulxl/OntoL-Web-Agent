@@ -334,8 +334,14 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             id                           TEXT PRIMARY KEY,
             scene_id                     TEXT    NOT NULL,
             ontol_scene_dictionary_id    TEXT    NOT NULL,
+            name                         TEXT    NOT NULL DEFAULT '',
+            code                         TEXT    NOT NULL DEFAULT '',
             create_time                  TEXT    NOT NULL DEFAULT (datetime('now')),
-            delete_flag                  TEXT    NOT NULL DEFAULT '0',
+            create_user                  TEXT    NOT NULL DEFAULT '',
+            update_time                  TEXT    NOT NULL DEFAULT '',
+            update_user                  TEXT    NOT NULL DEFAULT '',
+            delete_flag                  INTEGER NOT NULL DEFAULT 0,
+            is_system                    TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (scene_id) REFERENCES ontol_model_scene(id) ON DELETE CASCADE,
             FOREIGN KEY (ontol_scene_dictionary_id) REFERENCES ontol_scene_dictionary(id) ON DELETE CASCADE
         )
@@ -344,8 +350,24 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "CREATE INDEX IF NOT EXISTS idx_osdr_scene ON ontol_scene_dictionary_relation(scene_id)",
         "CREATE INDEX IF NOT EXISTS idx_osdr_dict  ON ontol_scene_dictionary_relation(ontol_scene_dictionary_id)",
         "CREATE INDEX IF NOT EXISTS idx_osdr_del   ON ontol_scene_dictionary_relation(delete_flag)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_osdr_code_active ON ontol_scene_dictionary_relation(code) WHERE delete_flag = 0",
     ]:
         _conn._exec(idx_sql)
+
+    # 迁移：关联表补充 name/code 字段
+    _RELATION_TABLES = [
+        "ontol_scene_dictionary_relation",
+    ]
+    for tbl in _RELATION_TABLES:
+        cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
+        if "name" not in cols:
+            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+        if "code" not in cols:
+            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+            _conn._exec(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl}_code_active "
+                f"ON {tbl}(code) WHERE delete_flag = 0"
+            )
 
     # ── LLM 模型配置表 ──
     _conn._exec("""
