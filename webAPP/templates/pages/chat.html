@@ -361,7 +361,7 @@
     <div class="chat-main">
         <div class="chat-main-header">
             <div class="conv-label">
-                当前对话 <span class="uuid" id="currentConvId">—</span>
+                当前对话 <span class="uuid" id="currentChatId">—</span>
             </div>
             <div>
                 <span id="streaming-indicator" class="streaming-indicator">● 生成中...</span>
@@ -425,12 +425,16 @@
 
 <!-- 场景选择器对话框 -->
 <div id="sceneSelectModal" class="modal-overlay" style="display:none;">
-    <div class="modal-box" style="max-width:460px;">
+    <div class="modal-box" style="max-width:520px;">
         <h4>📋 选择推演场景</h4>
         <p style="color:var(--text-dim);font-size:0.8rem;">为新建对话选择一个或多个场景（多选）</p>
         <div class="scene-selector" id="sceneCheckList">
             <div style="text-align:center;padding:1rem;color:var(--text-dim);">加载场景列表...</div>
         </div>
+        <p style="color:var(--text-dim);font-size:0.8rem;margin-top:0.5rem;">📋 选择推演副本（可选）</p>
+        <select id="copeVersionSelect" style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:rgba(10,15,40,0.8);color:#e8ecf4;margin-bottom:0.5rem;">
+            <option value="">— 不选择，自动创建新副本 —</option>
+        </select>
         <div class="modal-actions">
             <button class="btn-ghost" onclick="closeSceneModal()">取消</button>
             <button class="btn" onclick="confirmNewConversation()" style="background:rgba(0,212,255,0.2);">开始对话</button>
@@ -444,7 +448,7 @@
 // ═══════════════════════════════════════════════
 //  localStorage 对话存储引擎
 //  - 索引: chat_index → UUID[] (按 updatedAt 降序)
-//  - 数据: chat_{uuid} → {id, title, messages[], createdAt, updatedAt}
+//  - 数据: chat_{chat_id} → {id, title, messages[], createdAt, updatedAt}
 // ═══════════════════════════════════════════════
 
 const STORAGE_PREFIX = 'chat_';
@@ -465,13 +469,13 @@ function loadIndex() {
     } catch (_) { return []; }
 }
 
-function saveIndex(uuids) {
-    localStorage.setItem(INDEX_KEY, JSON.stringify(uuids));
+function saveIndex(chat_ids) {
+    localStorage.setItem(INDEX_KEY, JSON.stringify(chat_ids));
 }
 
-function loadConversation(uuid) {
+function loadConversation(chat_id) {
     try {
-        const raw = localStorage.getItem(STORAGE_PREFIX + uuid);
+        const raw = localStorage.getItem(STORAGE_PREFIX + chat_id);
         return raw ? JSON.parse(raw) : null;
     } catch (_) { return null; }
 }
@@ -497,12 +501,12 @@ async function deleteChatSceneBindings(chatId) {
     } catch (_) {}
 }
 
-function deleteConversation(uuid) {
+function deleteConversation(chat_id) {
     // 清理后端场景绑定
-    deleteChatSceneBindings(uuid);
+    deleteChatSceneBindings(chat_id);
     // 清理本地存储
-    localStorage.removeItem(STORAGE_PREFIX + uuid);
-    const index = loadIndex().filter(id => id !== uuid);
+    localStorage.removeItem(STORAGE_PREFIX + chat_id);
+    const index = loadIndex().filter(id => id !== chat_id);
     saveIndex(index);
 }
 
@@ -534,7 +538,7 @@ function formatTime(iso) {
 // ═══════════════════════════════════════════════
 
 let abortController = null;
-let currentConvId = null;        // 当前活跃对话的 UUID
+let currentChatId = null;        // 当前活跃对话的 UUID
 let currentMessages = [];        // 当前对话的消息数组（运行时）
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
@@ -554,7 +558,7 @@ let stepsLoaded = false;
 //  侧边栏渲染
 // ═══════════════════════════════════════════════
 
-let deleteTargetUuid = null;  // 待删除的 UUID
+let deleteTargetChatId = null;  // 待删除的 UUID
 
 function renderSidebar() {
     const index = loadIndex();
@@ -569,24 +573,24 @@ function renderSidebar() {
     }
 
     let html = '';
-    for (const uuid of index) {
-        const conv = loadConversation(uuid);
+    for (const chat_id of index) {
+        const conv = loadConversation(chat_id);
         if (!conv) continue;  // 脏数据跳过
-        const activeClass = uuid === currentConvId ? ' active' : '';
+        const activeClass = chat_id === currentChatId ? ' active' : '';
         const title = escHtml(conv.title || '新对话');
         const time = formatTime(conv.updatedAt || conv.createdAt);
         const msgCount = (conv.messages || []).length;
         const sceneNames = (conv.sceneNames || []).slice(0, 2).map(s => escHtml(s)).join(' · ');
         const sceneHint = sceneNames ? `<div class="conv-scenes">📋 ${sceneNames}</div>` : '';
         html += `
-            <div class="conv-item${activeClass}" onclick="switchConversation('${uuid}')" title="${title}">
+            <div class="conv-item${activeClass}" onclick="switchConversation('${chat_id}')" title="${title}">
                 <span class="conv-title">${title}</span>
                 ${sceneHint}
                 <span class="conv-meta">
                     <span>${msgCount} 条消息</span>
                     <span>${time}</span>
                 </span>
-                <button class="conv-delete" onclick="event.stopPropagation(); promptDelete('${uuid}', '${escHtml(title)}')" title="删除">🗑</button>
+                <button class="conv-delete" onclick="event.stopPropagation(); promptDelete('${chat_id}', '${escHtml(title)}')" title="删除">🗑</button>
             </div>`;
     }
     listEl.innerHTML = html;
@@ -598,8 +602,8 @@ function renderSidebar() {
 
 function newConversation() {
     // 如果有当前对话且为空，不重复创建
-    if (currentConvId) {
-        const conv = loadConversation(currentConvId);
+    if (currentChatId) {
+        const conv = loadConversation(currentChatId);
         if (conv && conv.messages.length === 0) {
             alert('当前已是空白对话，请直接输入消息开始聊天');
             return;
@@ -619,6 +623,19 @@ function openSceneModal() {
     document.getElementById('sceneSelectModal').style.display = 'flex';
     const listEl = document.getElementById('sceneCheckList');
     listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);"><div class="ot-spinner" style="width:12px;height:12px;margin:0 auto 0.4rem;border:2px solid rgba(0,212,255,0.2);border-top-color:#00d4ff;border-radius:50%;animation:spin 0.6s linear infinite;"></div>加载中...</div>';
+    // 加载推演副本下拉
+    const copeSel = document.getElementById('copeVersionSelect');
+    copeSel.innerHTML = '<option value="">加载中...</option>';
+    fetch('/api/v1/cope-versions')
+        .then(r => r.json())
+        .then(list => {
+            copeSel.innerHTML = '<option value="">— 不选择，自动创建新副本 —</option>' +
+                list.map(function(cv) {
+                    return '<option value="' + cv.id + '">' + escHtml(cv.name || cv.id) + ' (初始: ' + escHtml(cv.init_note_name || '—') + ')</option>';
+                }).join('');
+        })
+        .catch(function() { copeSel.innerHTML = '<option value="">— 加载失败 —</option>'; });
+    // 加载场景
     fetch('/api/v1/scenes')
         .then(r => r.json())
         .then(scenes => {
@@ -636,7 +653,6 @@ function openSceneModal() {
                     </div>
                 </label>`;
             }).join('');
-            // 点击整行切换选中
             listEl.querySelectorAll('.scene-check-item').forEach(item => {
                 item.addEventListener('click', function(e) {
                     if (e.target.tagName === 'INPUT') return;
@@ -665,11 +681,33 @@ function getSelectedSceneIds() {
 
 async function confirmNewConversation() {
     const sceneIds = getSelectedSceneIds();
-    const uuid = generateUUID();
-    const conv = {
-        id: uuid,
+    const chat_id = generateUUID();
+    const copeSel = document.getElementById('copeVersionSelect');
+    var selectedCopeId = copeSel ? copeSel.value : '';
+
+    // 如果没有选择推演副本，自动创建一个新的，chat_id 绑定到该副本
+    if (!selectedCopeId) {
+        try {
+            var createResp = await fetch('/api/v1/cope-versions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: '对话副本-' + chat_id.substring(0, 8),
+                    chat_id: chat_id,
+                    cope_version_status: '00',
+                    description: 'AI对话自动创建',
+                }),
+            });
+            var created = await createResp.json();
+            selectedCopeId = created.id;
+        } catch (_) { selectedCopeId = ''; }
+    }
+
+    var conv = {
+        id: chat_id,
         title: '新对话',
         sceneIds: sceneIds,
+        copeId: selectedCopeId || '',
         messages: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -682,38 +720,38 @@ async function confirmNewConversation() {
             await fetch('/api/v1/chat-scenes/bind', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chart_id: uuid, scene_ids: sceneIds }),
+                body: JSON.stringify({ chat_id: chat_id, scene_ids: sceneIds }),
             });
         } catch (_) {}
     }
 
     closeSceneModal();
-    switchConversation(uuid);
+    switchConversation(chat_id);
 }
 
-async function switchConversation(uuid) {
-    const conv = loadConversation(uuid);
+async function switchConversation(chat_id) {
+    const conv = loadConversation(chat_id);
     if (!conv) {
         // 数据不存在，从索引中清除
-        const index = loadIndex().filter(id => id !== uuid);
+        const index = loadIndex().filter(id => id !== chat_id);
         saveIndex(index);
         renderSidebar();
         return;
     }
 
     // 保存当前对话（如果有未保存的运行时消息）
-    if (currentConvId && currentConvId !== uuid) {
+    if (currentChatId && currentChatId !== chat_id) {
         persistCurrentMessages();
     }
 
-    currentConvId = uuid;
+    currentChatId = chat_id;
     currentMessages = [...(conv.messages || [])];
 
     // 加载场景名称
     let sceneNames = conv.sceneNames || [];
     if (!sceneNames.length && (conv.sceneIds || []).length > 0) {
         try {
-            const r = await fetch(`/api/v1/chat-scenes/${uuid}`);
+            const r = await fetch(`/api/v1/chat-scenes/${chat_id}`);
             if (r.ok) {
                 const data = await r.json();
                 sceneNames = data.map(d => d.name).filter(Boolean);
@@ -732,17 +770,17 @@ async function switchConversation(uuid) {
 }
 
 function updateChatHeader(sceneNames) {
-    const uuidPart = (currentConvId || '').substring(0, 8);
-    let html = `当前对话 <span class="uuid">${uuidPart}…</span>`;
+    const chatIdPart = (currentChatId || '').substring(0, 8);
+    let html = `当前对话 <span class="uuid">${chatIdPart}…</span>`;
     if (sceneNames && sceneNames.length > 0) {
         html += ` &nbsp;|&nbsp; <span style="font-size:0.7rem;color:#c4b5fd;">📋 ${sceneNames.map(s => escHtml(s)).join(', ')}</span>`;
     }
-    document.getElementById('currentConvId').parentElement.innerHTML = html;
+    document.getElementById('currentChatId').parentElement.innerHTML = html;
 }
 
 function persistCurrentMessages() {
-    if (!currentConvId) return;
-    const conv = loadConversation(currentConvId);
+    if (!currentChatId) return;
+    const conv = loadConversation(currentChatId);
     if (!conv) return;
     conv.messages = [...currentMessages];
     conv.title = deriveTitle(conv.messages);
@@ -753,27 +791,27 @@ function persistCurrentMessages() {
 //  删除确认
 // ═══════════════════════════════════════════════
 
-function promptDelete(uuid, title) {
-    deleteTargetUuid = uuid;
+function promptDelete(chat_id, title) {
+    deleteTargetChatId = chat_id;
     document.getElementById('deleteModalMsg').textContent =
         `确定要删除「${title}」吗？此操作不可恢复。`;
     document.getElementById('deleteModal').style.display = 'flex';
 }
 
 function closeDeleteModal() {
-    deleteTargetUuid = null;
+    deleteTargetChatId = null;
     document.getElementById('deleteModal').style.display = 'none';
 }
 
 function confirmDelete() {
-    if (!deleteTargetUuid) return;
-    const wasCurrent = deleteTargetUuid === currentConvId;
-    deleteConversation(deleteTargetUuid);
+    if (!deleteTargetChatId) return;
+    const wasCurrent = deleteTargetChatId === currentChatId;
+    deleteConversation(deleteTargetChatId);
 
     if (wasCurrent) {
-        currentConvId = null;
+        currentChatId = null;
         currentMessages = [];
-        document.getElementById('currentConvId').textContent = '—';
+        document.getElementById('currentChatId').textContent = '—';
         document.getElementById('chatEmpty').style.display = 'flex';
         messagesEl.innerHTML = `
             <div class="chat-empty" id="chatEmpty">
@@ -905,7 +943,7 @@ async function send() {
     if (!text || abortController) return;
 
     // 如果没有当前对话，自动创建
-    if (!currentConvId) {
+    if (!currentChatId) {
         newConversation();
         // newConversation 调用 switchConversation 是同步的
     }
@@ -931,7 +969,7 @@ async function send() {
         const resp = await fetch('/api/v1/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [...currentMessages], model: modelSelect.value, scene_ids: currentConvId ? (loadConversation(currentConvId)?.sceneIds || []) : [] }),
+            body: JSON.stringify({ messages: [...currentMessages], model: modelSelect.value, scene_ids: currentChatId ? (loadConversation(currentChatId)?.sceneIds || []) : [] }),
             signal: abortController.signal,
         });
 

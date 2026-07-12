@@ -246,6 +246,7 @@ project-root/
 | **MUST** 卡片按钮在右上角 | 卡片布局中，编辑和删除按钮必须放在卡片**右上角**，不占用卡片内容区域 |
 | **MUST** 操作按钮必须可见 | 所有 CRUD 操作（新增、编辑、删除）必须提供**可见的页面按钮**，禁止仅通过键盘快捷键触发；快捷键可作为辅助快捷入口，但不能是唯一操作路径 |
 | **MUST** 新建按钮必须有可见按钮 | 新增/创建操作必须同时提供**可见页面按钮**，不可仅依赖键盘快捷键（如 Ctrl+N）；快捷键为辅助手段，按钮是主要入口 |
+| **MUST** HTML 属性值转义 | 动态内容嵌入 HTML 属性时，必须通过 `escHtml()` 转义 `&` `<` `>` `"`，避免含引号的字符串截断 `value="..."` |
 
 ### 1.4 层级职责边界
 
@@ -460,25 +461,29 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 
 | 字段名称 | 数据类型（建议） | 约束条件 | 说明 |
 |----------|-----------------|----------|------|
-| `id` | TEXT / BIGINT | PRIMARY KEY, NOT NULL | 全局唯一主键，由后端 `uuid.uuid4().hex[:16]` 自动生成；图数据库用 Snowflake int64 |
-| `create_time` | TEXT / DATETIME | NOT NULL, DEFAULT `(datetime('now'))` | 记录创建时间，默认值为当前时间，不可由前端传入 |
-| `create_user` | TEXT / VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录创建人标识（如用户ID或账号），追溯数据来源 |
-| `update_time` | TEXT / DATETIME | NOT NULL, DEFAULT `''` | 记录最后更新时间，每次更新由后端自动刷新为当前时间 |
-| `update_user` | TEXT / VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录最后更新人标识，每次更新由后端自动刷新 |
-| `delete_flag` | TEXT / TINYINT | NOT NULL, DEFAULT `'0'` | 逻辑删除标志（`'0'`-未删除，`'1'`-已删除），物理删除禁止 |
-| `is_system` | TEXT / TINYINT | NOT NULL, DEFAULT `'0'` | 系统预设标志（`'0'`-自定义，`'1'`-系统预设，不可删除不可修改） |
+| `id` | TEXT | PRIMARY KEY, NOT NULL | UUID，由后端 `uuid.uuid4().hex[:16]` 自动生成 |
+| `name` | TEXT | NOT NULL, DEFAULT `''` | 名称 |
+| `code` | TEXT | NOT NULL | 编码，本表唯一 |
+| `create_time` | DATETIME / TIMESTAMP | NOT NULL, DEFAULT `(datetime('now'))` | 记录创建时间，默认值为当前时间 |
+| `create_user` | VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录创建人标识（如用户ID或账号） |
+| `update_time` | DATETIME / TIMESTAMP | NOT NULL, DEFAULT `''` | 记录最后更新时间，每次更新自动刷新 |
+| `update_user` | VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录最后更新人标识 |
+| `delete_flag` | INT | NOT NULL, DEFAULT 0 | 逻辑删除标志（0-未删除，1-已删除） |
+| `is_system` | TEXT | NOT NULL, DEFAULT `'0'` | `'0'`-自定义，`'1'`-系统预设，不可修改 |
 
 #### 8.2.2 标准 DDL 模板
 
 ```sql
 CREATE TABLE IF NOT EXISTS ontol_xxx (
     id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL DEFAULT '',
+    code            TEXT NOT NULL,
     -- ... 业务字段 ...
     create_time     TEXT NOT NULL DEFAULT (datetime('now')),
     create_user     TEXT NOT NULL DEFAULT '',
     update_time     TEXT NOT NULL DEFAULT '',
     update_user     TEXT NOT NULL DEFAULT '',
-    delete_flag     TEXT NOT NULL DEFAULT '0',
+    delete_flag     INTEGER NOT NULL DEFAULT 0,
     is_system       TEXT NOT NULL DEFAULT '0'
 );
 ```
@@ -487,8 +492,8 @@ CREATE TABLE IF NOT EXISTS ontol_xxx (
 
 | 操作 | 字段行为 |
 |------|----------|
-| **INSERT** | `id` 自动生成 UUID；`create_time` 取当前时间；`create_user` 从请求上下文注入；`update_time`/`update_user` 留空字符串；`delete_flag` 默认 `'0'` |
-| **UPDATE** | `update_time` 自动刷新为当前时间；`update_user` 从请求上下文注入；`id`/`create_time`/`create_user` 不可更新 |
+| **INSERT** | `id` 自动生成 UUID；`name`/`code` 可选；`create_time` 取当前时间；`create_user` 从请求上下文注入；`update_time`/`update_user` 留空字符串；`delete_flag` 默认 `'0'` |
+| **UPDATE** | `update_time` 自动刷新为当前时间；`update_user` 从请求上下文注入；`id`/`create_time`/`create_user`/`code` 不可更新 |
 | **DELETE** | 仅软删除：`UPDATE SET delete_flag = '1', update_time = datetime('now')`；**绝不**执行物理 `DELETE FROM` |
 | **SELECT** | 所有查询必须追加 `WHERE delete_flag = '0'`（除非元数据管理页面显式展示已删除数据） |
 
@@ -511,48 +516,34 @@ CREATE TABLE IF NOT EXISTS ontol_xxx (
 
 #### 8.2.5 迁移规则
 
-1. **新建表**：严格按 8.2.2 模板，6 个通用字段一个不能少
+1. **新建表**：严格按 8.2.2 模板，9 个通用字段（id, name, code, create_time, create_user, update_time, update_user, delete_flag, is_system）一个不能少
 2. **已有表**：通过 `ALTER TABLE ADD COLUMN` 逐字段补全，补充的列使用 `NOT NULL DEFAULT ''` 兼容已有数据
 3. **历史命名**：`create_id` → `create_user`，`update_id` → `update_user`，`created_by` → `create_user`
 4. **图数据库（Memgraph）**：仅节点/边属性参照执行，`id` 使用 Snowflake int64，其余字段按 key-value 标量类型存储
 
-#### 8.2.6 关联表专用规范
+#### 8.2.6 关联表补充规范
 
-> 关联表（如 `ontol_*_relation`、`ontol_*_scene_relation`）除 7 个通用字段外，**必须**额外包含 `name` 和 `code` 字段。
-
-| 字段名称 | 数据类型（建议） | 约束条件 | 说明 |
-|----------|-----------------|----------|------|
-| `id` | TEXT | PRIMARY KEY, NOT NULL | UUID，由后端 `uuid.uuid4().hex[:16]` 自动生成 |
-| `name` | TEXT | — | 关联名称 |
-| `code` | TEXT | NOT NULL，本表唯一 | 关联编码，唯一索引 |
-| `create_time` | TEXT | NOT NULL, DEFAULT `(datetime('now'))` | 记录创建时间 |
-| `create_user` | TEXT | NOT NULL, DEFAULT `''` | 创建人标识 |
-| `update_time` | TEXT | NOT NULL, DEFAULT `''` | 最后更新时间 |
-| `update_user` | TEXT | NOT NULL, DEFAULT `''` | 最后更新人标识 |
-| `delete_flag` | INT | NOT NULL, DEFAULT 0 | 逻辑删除（0-未删除，1-已删除） |
-| `is_system` | TEXT | NOT NULL, DEFAULT `'0'` | `'0'`-自定义，`'1'`-系统预设，不可修改 |
-
-**关联表标准 DDL 模板**：
+> 关联表（如 `ontol_*_relation`、`ontol_*_scene_relation`）除 9 个通用字段外，建议额外建立 `code` 唯一索引，并在 DDL 中声明 FOREIGN KEY：
 
 ```sql
 CREATE TABLE IF NOT EXISTS ontol_xxx_relation (
-    id            TEXT PRIMARY KEY,
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL DEFAULT '',
+    code            TEXT NOT NULL DEFAULT '',
     -- ... 外键字段 (scene_id, xxx_id 等) ...
-    name          TEXT NOT NULL DEFAULT '',
-    code          TEXT NOT NULL,
-    create_time   TEXT NOT NULL DEFAULT (datetime('now')),
-    create_user   TEXT NOT NULL DEFAULT '',
-    update_time   TEXT NOT NULL DEFAULT '',
-    update_user   TEXT NOT NULL DEFAULT '',
-    delete_flag   INTEGER NOT NULL DEFAULT 0,
-    is_system     TEXT NOT NULL DEFAULT '0',
+    create_time     TEXT NOT NULL DEFAULT (datetime('now')),
+    create_user     TEXT NOT NULL DEFAULT '',
+    update_time     TEXT NOT NULL DEFAULT '',
+    update_user     TEXT NOT NULL DEFAULT '',
+    delete_flag     TEXT NOT NULL DEFAULT '0',
+    is_system       TEXT NOT NULL DEFAULT '0',
     FOREIGN KEY (...) REFERENCES ...
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_xxxrel_code_active
     ON ontol_xxx_relation(code) WHERE delete_flag = 0;
 ```
 
-> ⚠️ **与图数据库（Memgraph）的区别**：本节约束仅适用于 **SQLite 关联表**。Memgraph 中的边属性使用 key-value 标量类型，不在此表设计规范范围内，两者互不冲突。
+> ⚠️ **与图数据库（Memgraph）的区别**：本节约束仅适用于 **SQLite**。Memgraph 中的边属性使用 key-value 标量类型，不在此表设计规范范围内。
 
 ### 8.3 Memgraph (图数据库)
 

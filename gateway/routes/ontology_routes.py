@@ -1998,7 +1998,7 @@ async def delete_scene(scene_id: str, soft: bool = True):
 # =========================================================================
 
 class ChatSceneBind(BaseModel):
-    chart_id: str = Field(..., description="对话UUID")
+    chat_id: str = Field(..., description="对话UUID")
     scene_ids: list[str] = Field(..., description="场景ID列表")
 
 
@@ -2008,35 +2008,35 @@ async def bind_chat_scenes(body: ChatSceneBind):
     try:
         # 先清理旧绑定
         await _execute_scene(
-            "UPDATE ontol_char_scene_relation SET delete_flag='1' WHERE chart_id=?",
-            (body.chart_id,),
+            "UPDATE ontol_char_scene_relation SET delete_flag='1' WHERE chat_id=?",
+            (body.chat_id,),
         )
         # 批量插入新绑定
         import uuid as _uuid
         for sid in body.scene_ids:
             rid = _uuid.uuid4().hex[:16]
             await _execute_scene(
-                "INSERT INTO ontol_char_scene_relation (id, chart_id, scene_id) VALUES (?,?,?)",
-                (rid, body.chart_id, sid),
+                "INSERT INTO ontol_char_scene_relation (id, chat_id, scene_id) VALUES (?,?,?)",
+                (rid, body.chat_id, sid),
             )
-        return await get_chat_scenes(body.chart_id)
+        return await get_chat_scenes(body.chat_id)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bind chat scenes failed: {e}")
 
 
-@router.get("/chat-scenes/{chart_id}")
-async def get_chat_scenes(chart_id: str):
+@router.get("/chat-scenes/{chat_id}")
+async def get_chat_scenes(chat_id: str):
     """获取对话绑定的场景列表（带场景名称）。"""
     try:
         rows = await _query_scene(
-            """SELECT r.id, r.chart_id, r.scene_id, s.name, s.scene_desc
+            """SELECT r.id, r.chat_id, r.scene_id, s.name, s.scene_desc
                FROM ontol_char_scene_relation r
                LEFT JOIN ontol_model_scene s ON r.scene_id = s.id
-               WHERE r.chart_id=? AND r.delete_flag='0'
+               WHERE r.chat_id=? AND r.delete_flag='0'
                ORDER BY r.create_time""",
-            (chart_id,),
+            (chat_id,),
         )
         return rows
     except Exception as e:
@@ -2776,3 +2776,224 @@ async def delete_function(func_id: str, soft: bool = True):
         return {"deleted": True, "func_id": func_id, "soft": soft}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+
+
+# =========================================================================
+# 推演版本管理 CRUD (ontol_cope_version_relation)
+# =========================================================================
+
+class CopeVersionCreate(BaseModel):
+    name: str = Field(default="", description="副本名称")
+    chat_id: str = Field(default="", description="关联对话ID")
+    cope_version_status: str = Field(default="00", description="状态: 00待处理/01推理中/02推理完成/03已删除")
+    init_note_id: str = Field(default="", description="初始节点ID")
+    init_note_name: str = Field(default="", description="初始节点名称")
+    description: str = Field(default="", description="描述")
+    confidence: float = Field(default=0.8, ge=0.01, le=1.0, description="置信度 (0.01~1.00)")
+
+class CopeVersionUpdate(BaseModel):
+    name: Optional[str] = Field(None, description="副本名称")
+    cope_version_status: Optional[str] = Field(None, description="状态")
+    init_note_id: Optional[str] = Field(None, description="初始节点ID")
+    init_note_name: Optional[str] = Field(None, description="初始节点名称")
+    description: Optional[str] = Field(None, description="描述")
+    confidence: Optional[float] = Field(None, ge=0.01, le=1.0, description="置信度 (0.01~1.00)")
+
+
+@router.get("/cope-versions")
+async def list_cope_versions():
+    """查询 ontol_cope_version_relation 所有有效记录。"""
+    try:
+        rows = await _query_scene(
+            "SELECT * FROM ontol_cope_version_relation WHERE delete_flag='0' ORDER BY create_time DESC"
+        )
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query cope versions failed: {e}")
+
+
+@router.post("/cope-versions")
+async def create_cope_version(body: CopeVersionCreate):
+    """新增副本版本记录。"""
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    rid = _uuid.uuid4().hex[:16]
+    now = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        await _execute_scene(
+            "INSERT INTO ontol_cope_version_relation "
+            "(id, name, code, chat_id, cope_version_status, description, init_note_id, init_note_name, confidence, create_time) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (rid, body.name, rid, body.chat_id, body.cope_version_status,
+             body.description, body.init_note_id, body.init_note_name, body.confidence, now),
+        )
+        rows = await _query_scene("SELECT * FROM ontol_cope_version_relation WHERE id=?", (rid,))
+        return rows[0] if rows else {"id": rid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Create cope version failed: {e}")
+
+
+@router.put("/cope-versions/{cope_id}")
+async def update_cope_version(cope_id: str, body: CopeVersionUpdate):
+    """更新副本版本记录。"""
+    from datetime import datetime as _dt
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates["update_time"] = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        sets = ", ".join(f"{k}=?" for k in updates)
+        params = tuple(updates.values()) + (cope_id,)
+        await _execute_scene(
+            f"UPDATE ontol_cope_version_relation SET {sets} WHERE id=?",
+            params,
+        )
+        rows = await _query_scene("SELECT * FROM ontol_cope_version_relation WHERE id=?", (cope_id,))
+        return rows[0] if rows else {"id": cope_id, "updated": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Update cope version failed: {e}")
+
+
+@router.delete("/cope-versions/{cope_id}")
+async def delete_cope_version(cope_id: str):
+    """软删除副本版本记录。"""
+    from datetime import datetime as _dt
+    try:
+        now = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        await _execute_scene(
+            "UPDATE ontol_cope_version_relation SET delete_flag='1', update_time=? WHERE id=?",
+            (now, cope_id),
+        )
+        return {"deleted": True, "cope_id": cope_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete cope version failed: {e}")
+
+
+@router.delete("/cope-versions/{cope_id}/nodes")
+async def delete_cope_version_nodes(cope_id: str):
+    """批量删除图数据库中 cope_version 匹配该记录 ID 的节点。"""
+    from infrastructure.db.neo4j import get_driver
+
+    try:
+        driver = await get_driver()
+        async with driver.session() as session:
+            result = await session.run(
+                "MATCH (n) WHERE n.cope_version = $cope_id DETACH DELETE n RETURN count(n) AS deleted",
+                cope_id=cope_id,
+            )
+            record = await result.single()
+            count = record["deleted"] if record else 0
+        return {"deleted": True, "cope_id": cope_id, "node_count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete cope version nodes failed: {e}")
+
+
+@router.get("/cope-versions/{cope_id}")
+async def get_cope_version(cope_id: str):
+    """查询单条副本版本记录。"""
+    try:
+        rows = await _query_scene(
+            "SELECT * FROM ontol_cope_version_relation WHERE id=? AND delete_flag='0'",
+            (cope_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Cope version not found")
+        return rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query cope version failed: {e}")
+
+
+@router.get("/cope-versions/{cope_id}/graph")
+async def get_cope_graph(cope_id: str):
+    """
+    获取推演副本的图数据（节点+关系）。
+    - status=00: 返回没有 cope_version 属性的节点
+    - 其他状态: 返回 cope_version=cope_id 的节点
+    """
+    from infrastructure.db.neo4j import get_driver
+
+    try:
+        # 查副本状态
+        rows = await _query_scene(
+            "SELECT * FROM ontol_cope_version_relation WHERE id=? AND delete_flag='0'",
+            (cope_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Cope version not found")
+        cope = rows[0]
+        status = cope.get("cope_version_status", "00")
+
+        driver = await get_driver()
+        async with driver.session() as session:
+            if status == "00":
+                cypher = """
+                    MATCH (n)
+                    WHERE n.cope_version IS NULL OR n.cope_version = ''
+                    OPTIONAL MATCH (n)-[r]-(m)
+                    WHERE m.cope_version IS NULL OR m.cope_version = ''
+                    RETURN n, collect(DISTINCT {edge: r, node: m}) AS rels
+                    LIMIT 500
+                """
+            else:
+                cypher = """
+                    MATCH (n)
+                    WHERE n.cope_version = $cope_id
+                    OPTIONAL MATCH (n)-[r]-(m)
+                    WHERE m.cope_version = $cope_id
+                    RETURN n, collect(DISTINCT {edge: r, node: m}) AS rels
+                    LIMIT 500
+                """
+            result = await session.run(cypher, cope_id=cope_id)
+            records = [record async for record in result]
+
+        nodes = {}
+        edges = {}
+        for record in records:
+            n = record["n"]
+            nid = n.element_id
+            if nid not in nodes:
+                nodes[nid] = {
+                    "id": n.element_id,
+                    "labels": list(n.labels),
+                    "properties": dict(n.items()),
+                }
+            rels_list = record.get("rels")
+            if rels_list:
+                for rel_item in rels_list:
+                    r = rel_item.get("edge")
+                    m = rel_item.get("node")
+                    if r is None or m is None:
+                        continue
+                    mid = m.element_id
+                    if mid not in nodes:
+                        nodes[mid] = {
+                            "id": m.element_id,
+                            "labels": list(m.labels),
+                            "properties": dict(m.items()),
+                        }
+                    ekey = str(r.element_id)
+                    if ekey not in edges:
+                        edges[ekey] = {
+                            "edge_id": r.element_id,
+                            "source_id": r.start_node.element_id,
+                            "target_id": r.end_node.element_id,
+                            "type": r.type,
+                            "properties": dict(r.items()),
+                        }
+
+        return {
+            "cope_id": cope_id,
+            "cope_version_status": status,
+            "cope_name": cope.get("name", ""),
+            "init_note_id": cope.get("init_note_id", ""),
+            "init_note_name": cope.get("init_note_name", ""),
+            "confidence": float(cope.get("confidence", 0.8)),
+            "nodes": list(nodes.values()),
+            "edges": list(edges.values()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cope graph query failed: {e}")

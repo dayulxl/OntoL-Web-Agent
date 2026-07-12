@@ -29,7 +29,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 态势总览 | http://localhost:8000/ | Canvas 态势图 + 兵力编成 + 场景管理入口 |
 | AI 对话 | http://localhost:8000/chat | 多轮对话，左侧历史列表，支持场景绑定 + 提示词选择 |
 | 场景管理 | http://localhost:8000/prompt-manager | 左场景右提示词，场景+提示词 CRUD |
-| 沙盘推演 | http://localhost:8000/sandbox-wargame | ReactFlow 图编辑 + 推理机推演 |
+| 沙盘推演 | http://localhost:8000/sandbox-wargame | ReactFlow 图编辑 + 推理机推演 + 推演副本模式（?id=） |
 | 本体语义 | http://localhost:8000/ontology-template | 左树右详情，本体模型/字段管理 |
 | 本体建模 | http://localhost:8000/ontology | 知识图谱可视化 + 场景管理 + 节点历史 |
 | 文件上传 | http://localhost:8000/upload | 上传 + AI 解析 + 图数据库导入 + 场景关联 |
@@ -53,7 +53,8 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 ├── business/         # 业务逻辑层
 ├── capabilities/     # 能力层 (LLM 调用、工具等)
 │   ├── agents/chat_agent.py         # ChatAgent（ReAct + 7工具 + 动态提示词）
-│   └── memory/graph_memory.py       # Memgraph 图记忆（标准 Cypher 兼容，增删属性）
+│   ├── memory/graph_memory.py       # Memgraph 图记忆（标准 Cypher 兼容，增删属性）
+│   └── graph_reasoner/              # 图推理引擎 — 推理机协调者 + 前端服务层
 ├── common/           # 共享设施 (config/settings.py, utils/logger.py)
 ├── infrastructure/   # 基础设施
 │   ├── db/neo4j.py                  # Memgraph 驱动（memgraph:// → bolt:// 自动转换）
@@ -64,6 +65,8 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   │   ├── pages/prompt_manager.html  # 🆕 场景管理（场景+提示词）
 │   │   └── components/navbar.html     # 导航栏（12 个链接）
 │   ├── static/css/                  # 全局样式
+│   └── static/js/
+│       └── graph-layout.js           # 有向图布局引擎（source左target右，纯技术函数）
 ├── tests/            # 测试 (pytest, asyncio)
 ├── deployments/      # Docker & K8s 部署配置
 └── scripts/          # 运维脚本
@@ -85,9 +88,12 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
   - `ontol_data_his` — 图数据变更历史（节点 CRUD 自动记录 + 版本号递增）
   - `ontol_datasource` — 数据源配置（MySQL/PG/Oracle 等）
   - `ontol_datasource_type` — 数据源类型（`is_system='1'`=系统预设，不可删改）
+  - `ontol_cope_version_relation` — 🆕 推演副本版本关联表（chat_id + 状态 00/01/02/03 + 初始节点 + 置信度）
 - **数据主键约定**: 所有表的 `id` 由后端 `uuid.uuid4().hex[:16]` 自动生成，前端表单禁止展示 id 输入框，列表不展示原始 id；`code`/`name` 等仅作业务语义字段
 - **表命名规范**: SQLite 中所有本体语义相关的配置/元数据表必须以 `ontol_` 为前缀
 - **前端按钮布局规范**: 新增按钮放在内容区顶部，必须有可见按钮不含快捷键；编辑/删除按钮：列表行右侧/卡片右上角
+- **HTML 属性值转义**: 动态内容嵌入 HTML 属性时必须用 `escHtml()` 转义 `&` `<` `>` `"`，防止含引号的字符串（如 `actionType: "inference"`）截断 `value="..."`
+- **JS 变量命名**: 对话/副本 ID 统一用 `chat_id`（前后端一致），前端模块变量用 `currentChatId`
 - **配置**: Pydantic Settings (.env)
 - **日志**: structlog
 
@@ -148,9 +154,18 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 
 ### 推理机代理
 - `POST /api/v1/tools/call` → KG 推理机 (`KG_SERVER_URL`)
-- 默认工具名 `infer_forward`，也可调用 `validate`, `check_rule`, `expand`
+- 默认工具名 `infer_forward`，也可调用 `validate`, `check_rule`, `expand`, `infer_on_nodes_id`
 - **副本节点 ID 规则**：推理机创建副本节点时，节点 ID 必须为 `{原节点ID}-{副本编码}`（如 `node_12345-V1.0`），确保图内全局唯一
 - **图节点/边 Snowflake ID**：Memgraph 中所有节点和边的 `id` 使用 **Snowflake 算法** 生成 **64 位纯数字整数**（int64，不转字符串）；导入时 `SnowflakeGenerator` 先查询已有 ID 去重，再将 LLM 随机字符串 ID 替换为纯数字 Snowflake ID，相同随机串映射到相同 Snowflake ID
+
+### 推演副本管理 🆕
+- **表**: `ontol_cope_version_relation` — 副本主键 id + 副本名称 name + 对话ID chat_id + 状态 cope_version_status(00待处理/01推理中/02推理完成/03已删除) + 初始节点 init_note_id/init_note_name + 置信度 confidence + 描述 description
+- **API**: `GET/POST/PUT/DELETE /api/v1/cope-versions` + `GET /api/v1/cope-versions/{id}/graph`（副本图数据）+ `DELETE /api/v1/cope-versions/{id}/nodes`（删除副本节点）
+- **图数据查询逻辑**: status=00 → 查无 cope_version 属性的原始节点；status≠00 → 查 cope_version={id} 的副本节点
+- **沙盘推演副本模式**: `?id={cope_id}` 进入推演模式，工具栏显示推演名称+初始节点；点击「推演」→ 调用 `infer_on_nodes_id` 工具；推理成功 → 状态自动变 02
+- **重置按钮**: 推演模式下显「🔄 重置」，根据 graph_id 用原节点数据覆盖副本节点
+- **节点隔离**: 推演模式下创建的节点/关系自动注入 `cope_version={id}` 属性
+- **AI 对话绑定**: 新建对话时可选推演副本，未选则自动创建新副本关联 chat_id
 
 ### 本体前缀规范
 
@@ -167,6 +182,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 7 | 对象属性/程序属性 | JSONPath | `$.` | `$.node1.node1-1` | 符合 RFC 9535 标准 |
 | 8 | 边类型 | 路径标识 | `actionType:` | `actionType: "inference"` | 路由标识：指定执行分支。`inference`=走推理机逻辑判断边属性；其他值=大模型关系，不走推理机 |
 | 9 | 边属性 | 自定义动作接口 | 边的 Key-Value | 见下方 | |
+| 10 | 图数据操作 | Cypher 查询语言 | `cypher:` | `CYPHER: MATCH (n:Person {name: 'Alice'}) RETURN n` | Memgraph 原生支持 openCypher 标准，用于图数据模式匹配、节点/关系的增删改查 (CRUD) 及图遍历操作 |
 
 **边属性规范 (Memgraph Key-Value)**：边属性仅支持标量类型，不支持嵌套 JSON/Map。标准边属性定义 `STandARD_EDGE_PROPS`（见 `ontology.html`）：
 
