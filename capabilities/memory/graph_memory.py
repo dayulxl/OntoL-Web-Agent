@@ -370,32 +370,39 @@ class GraphMemory:
         """
         depth = max(1, min(depth, 3))
         async with self._driver.session() as session:
-            result = await session.run(
+            # 先查节点自身
+            node_rec = await session.run(
+                "MATCH (n) WHERE id(n) = $node_id "
+                "RETURN n", node_id=node_id)
+            node_row = await node_rec.single()
+            if not node_row:
+                return {"node": None, "neighbors": []}
+            node = node_row["n"]
+
+            # 再查邻居（兼容 Memgraph 不支持的 length(path) → size(rels)）
+            neighbor_rec = await session.run(
                 f"""
                 MATCH (n) WHERE id(n) = $node_id
-                OPTIONAL MATCH path = (n)-[*1..{depth}]-(m)
-                WITH n, m, relationships(path) AS rels, length(path) AS dist
-                WHERE m IS NOT NULL
-                RETURN n,
-                       collect(DISTINCT {{
-                         node_id: id(m),
-                         labels: labels(m),
-                         properties: properties(m),
-                         path_length: dist,
-                         edge: {{id: id(rels[0]), type: type(rels[0]), properties: properties(rels[0]),
-                                source_id: id(startNode(rels[0])), target_id: id(endNode(rels[0]))}}
-                       }}) AS neighbors
+                MATCH path = (n)-[*1..{depth}]-(m)
+                WITH m, relationships(path) AS rels, size(relationships(path)) AS dist
+                RETURN collect(DISTINCT {{
+                    node_id: id(m),
+                    labels: labels(m),
+                    properties: properties(m),
+                    path_length: dist,
+                    edge: {{id: id(rels[0]), type: type(rels[0]), properties: properties(rels[0]),
+                           source_id: id(startNode(rels[0])), target_id: id(endNode(rels[0]))}}
+                }}) AS neighbors
                 """,
                 node_id=node_id,
             )
-            record = await result.single()
-            if not record:
-                return {"node": None, "neighbors": []}
+            neighbor_row = await neighbor_rec.single()
+            raw = (neighbor_row["neighbors"] if neighbor_row else []) or []
+            neighbors = [nb for nb in raw if nb is not None]
 
-            node = record["n"]
             return {
                 "node": {"id": node.id, "labels": list(node.labels), "properties": dict(node)},
-                "neighbors": record["neighbors"],
+                "neighbors": neighbors,
             }
 
     async def execute_readonly_cypher(self, query: str, params: Optional[dict] = None) -> list[dict]:
