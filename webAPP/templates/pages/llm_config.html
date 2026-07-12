@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}模型管理 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.lc-layout { display: flex; height: calc(100vh - 60px); background: rgba(8,12,32,0.96); }
+
+.lc-sidebar { width: 300px; min-width: 300px; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.lc-sidebar-header { padding: 1rem 1rem 0.6rem; border-bottom: 1px solid rgba(0,212,255,0.08); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
+.lc-sidebar-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin: 0; }
+.lc-tree-wrap { flex: 1; overflow-y: auto; padding: 0.5rem 0; }
+.lc-tree-item { display: flex; align-items: center; gap: 0.35rem; padding: 0.45rem 1rem; cursor: pointer; border-left: 3px solid transparent; font-size: 0.82rem; }
+.lc-tree-item:hover { background: rgba(0,212,255,0.05); }
+.lc-tree-item.active { border-left-color: var(--accent); background: rgba(0,212,255,0.08); }
+.lc-tree-item .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-tree-item .badge { font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 3px; flex-shrink: 0; background: rgba(0,212,255,0.1); color: var(--accent); }
+.lc-tree-item .badge.sys { background: rgba(239,68,68,0.1); color: #ef4444; }
+.lc-tree-item .btn-group { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; margin-left: auto; }
+.lc-tree-item:hover .btn-group { opacity: 1; }
+
+.lc-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.lc-main-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.lc-main-header h2 { margin: 0; font-size: 1rem; }
+.lc-main-body { flex: 1; overflow-y: auto; padding: 1.2rem 1.5rem; }
+.lc-empty { text-align: center; color: var(--text-dim); padding: 3rem 1rem; font-size: 0.85rem; }
+
+.lc-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.lc-table th { text-align: left; padding: 0.5rem 0.8rem; background: rgba(0,212,255,0.05); color: var(--accent); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.lc-table td { padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(0,212,255,0.06); color: var(--text); font-size: 0.8rem; }
+.lc-table tr:hover td { background: rgba(0,212,255,0.03); }
+.lc-table .url-cell { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 0.72rem; }
+.lc-table .key-cell { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 0.7rem; color: var(--text-dim); }
+.lc-table .btn-group { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.lc-table tr:hover .btn-group { opacity: 1; }
+
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-box { background: rgba(8,12,32,0.98); border: 1px solid var(--accent); border-radius: 10px; padding: 1.8rem; width: 550px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+.modal-box h3 { margin: 0 0 1rem; color: var(--accent); font-size: 1rem; }
+.modal-box label { display: block; font-size: 0.78rem; color: var(--text-dim); margin: 0.6rem 0 0.2rem; }
+.modal-box input, .modal-box select, .modal-box textarea { width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: var(--text); padding: 0.5rem; border-radius: 4px; font-size: 0.82rem; outline: none; resize: vertical; }
+.modal-box input:focus, .modal-box select:focus, .modal-box textarea:focus { border-color: var(--accent); }
+.modal-box .btn-row { display: flex; gap: 0.6rem; margin-top: 1.2rem; }
+
+.btn { padding: 0.35rem 0.8rem; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font-size: 0.75rem; transition: all 0.2s; }
+.btn:hover { border-color: var(--accent); }
+.btn-accent { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+.btn-danger { border-color: #ef4444; color: #ef4444; }
+.btn-sm { padding: 0.15rem 0.5rem; font-size: 0.65rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="lc-layout">
+
+    <aside class="lc-sidebar">
+        <div class="lc-sidebar-header">
+            <span class="lc-sidebar-title">📋 大模型分类</span>
+            <button class="btn btn-accent btn-sm" onclick="showTypeForm()">＋ 新建</button>
+        </div>
+        <div class="lc-tree-wrap" id="treeWrap">
+            <ul class="lc-tree" id="lcTree"><div style="text-align:center;color:var(--text-dim);padding:2rem;">加载中...</div></ul>
+        </div>
+    </aside>
+
+    <main class="lc-main">
+        <div class="lc-main-header" id="mainHeader">
+            <h2 style="color:var(--text-dim);">← 请选择左侧分类</h2>
+        </div>
+        <div class="lc-main-body" id="mainBody">
+            <div class="lc-empty">选择左侧分类后此处显示该分类下的模型配置</div>
+        </div>
+    </main>
+</div>
+
+<div id="modalOverlay" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeModal()">
+    <div class="modal-box" id="modalBox" onclick="event.stopPropagation()"></div>
+</div>
+
+<script>
+var API_TYPE = '/api/v1/llm-type-configs';
+var API_CFG = '/api/v1/llm-configs';
+var typeData = [], activeType = null;
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function init(){
+    await loadTypes();
+    renderTree();
+}
+init();
+
+async function loadTypes(){
+    try { typeData = await (await fetch(API_TYPE,{cache:'no-cache'})).json(); }
+    catch(e){ console.error(e); }
+}
+
+function renderTree(){
+    var root=document.getElementById('lcTree');
+    if(!typeData.length){ root.innerHTML='<div style="text-align:center;color:var(--text-dim);padding:2rem;">暂无分类</div>'; return; }
+    root.innerHTML = typeData.map(function(d){
+        var isActive = activeType && activeType.id === d.id;
+        var isSys = d.is_system === '1';
+        return '<div class="lc-tree-item' + (isActive?' active':'') + '" onclick="selectType(\x27' + d.id + '\x27)">' +
+            '<span class="label">' + esc(d.name) + '</span>' +
+            (isSys ? '<span class="badge sys">预设</span>' : '') +
+            '<span class="btn-group" onclick="event.stopPropagation()">' +
+                (isSys ? '' : '<button class="btn btn-sm" onclick="showTypeForm(\x27' + d.id + '\x27)">✏</button>') +
+                (isSys ? '' : '<button class="btn btn-sm btn-danger" onclick="delType(\x27' + d.id + '\x27)">✕</button>') +
+            '</span>' +
+        '</div>';
+    }).join('');
+}
+
+async function selectType(id){
+    activeType = typeData.find(function(d){ return d.id === id; });
+    renderTree();
+    await loadConfigs(id);
+}
+
+async function loadConfigs(typeId){
+    var body = document.getElementById('mainBody');
+    var hdr = document.getElementById('mainHeader');
+    var title = activeType ? esc(activeType.name) : typeId;
+    try {
+        var configs = await (await fetch(API_CFG + '?type_config_id=' + typeId, {cache:'no-cache'})).json();
+        hdr.innerHTML = '<h2>🤖 ' + title + ' <span style="font-size:0.72rem;color:var(--text-dim);">(' + configs.length + ' 个模型)</span></h2>' +
+            '<button class="btn btn-accent btn-sm" onclick="showCfgForm()">＋ 新建模型</button>';
+        if(!configs.length){ body.innerHTML = '<div class="lc-empty">该分类下暂无模型配置</div>'; return; }
+        body.innerHTML = '<table class="lc-table"><thead><tr><th>显示名</th><th>API模型</th><th>调用地址</th><th>Key</th><th>描述</th><th>时间</th><th style="width:60px;">操作</th></tr></thead><tbody>' +
+            configs.map(function(d){
+                return '<tr>' +
+                    '<td>' + esc(d.name) + '</td>' +
+                    '<td style="font-family:monospace;font-size:0.75rem;">' + esc(d.llm_model||'—') + '</td>' +
+                    '<td class="url-cell" title="' + esc(d.llm_url||'') + '">' + esc(d.llm_url||'—') + '</td>' +
+                    '<td class="key-cell" title="' + esc(d.llm_key||'') + '">' + (d.llm_key ? '●●●●' + d.llm_key.slice(-4) : '—') + '</td>' +
+                    '<td>' + esc(d.llm_description||'—') + '</td>' +
+                    '<td>' + (d.create_time||'').substring(0,10) + '</td>' +
+                    '<td><span class="btn-group">' +
+                        '<button class="btn btn-sm" onclick="showCfgForm(\x27' + d.id + '\x27)">✏</button>' +
+                        '<button class="btn btn-sm btn-danger" onclick="delCfg(\x27' + d.id + '\x27)">✕</button>' +
+                    '</span></td></tr>';
+            }).join('') + '</tbody></table>';
+    } catch(e) { body.innerHTML = '<div class="lc-empty">加载失败</div>'; }
+}
+
+// ── 分类弹窗 ──
+function showTypeForm(typeId){
+    var isEdit = !!typeId;
+    var ex = {};
+    if(isEdit){ ex = typeData.find(function(d){return d.id===typeId;}) || {}; }
+    document.getElementById('modalBox').innerHTML =
+        '<h3>' + (isEdit?'编辑分类':'新建分类') + '</h3>' +
+        '<label>类型名称 <span style="color:#ef4444;">*</span></label>' +
+        '<input id="f-tname" value="' + esc(ex.name||'') + '" placeholder="如 默认模型、OpenAPI模型" maxlength="200" />' +
+
+        '<label>描述</label>' +
+        '<input id="f-tdesc" value="' + esc(ex.llm_description||'') + '" placeholder="分类描述" maxlength="500" />' +
+        '<div class="btn-row">' +
+            '<button class="btn btn-accent" onclick="' + (isEdit?'updType(\x27'+typeId+'\x27)':'addType()') + '">💾 保存</button>' +
+            '<button class="btn" onclick="closeModal()">取消</button>' +
+        '</div>';
+    document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+async function addType(){
+    var n = document.getElementById('f-tname').value.trim();
+    if(!n){ alert('请输入名称'); return; }
+    var r = await fetch(API_TYPE, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'',name:n,llm_description:document.getElementById('f-tdesc').value.trim()||null}),cache:'no-cache'});
+    if(!r.ok){ alert('失败'); return; }
+    closeModal(); await loadTypes(); renderTree();
+}
+
+async function updType(id){
+    var n = document.getElementById('f-tname').value.trim();
+    if(!n){ alert('请输入名称'); return; }
+    var r = await fetch(API_TYPE+'/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,llm_description:document.getElementById('f-tdesc').value.trim()||null}),cache:'no-cache'});
+    if(!r.ok){ alert('失败'); return; }
+    closeModal(); await loadTypes(); renderTree(); if(activeType&&activeType.id===id) await loadConfigs(id);
+}
+
+async function delType(id){
+    if(!confirm('确定删除该分类？')) return;
+    await fetch(API_TYPE+'/'+id+'?soft=true', {method:'DELETE',cache:'no-cache'});
+    if(activeType&&activeType.id===id){ activeType=null; document.getElementById('mainBody').innerHTML='<div class="lc-empty">← 请选择分类</div>'; }
+    await loadTypes(); renderTree();
+}
+
+// ── 模型配置弹窗 ──
+function showCfgForm(cfgId){
+    var isEdit = !!cfgId;
+    (async function(){
+        var ex = {};
+        if(isEdit){
+            try { ex = await (await fetch(API_CFG+'/'+cfgId,{cache:'no-cache'})).json(); } catch(e){}
+        }
+        document.getElementById('modalBox').innerHTML =
+            '<h3>' + (isEdit?'编辑模型':'新建模型') + '</h3>' +
+            '<label>显示名 <span style="color:#ef4444;">*</span></label>' +
+            '<input id="f-name" value="' + esc(ex.name||'') + '" placeholder="如 DeepSeek-V4" maxlength="200" />' +
+            '<label>API 模型名 <span style="color:#ef4444;">*</span></label>' +
+            '<input id="f-model" value="' + esc(ex.llm_model||'') + '" placeholder="如 deepseek-v4-pro" maxlength="200" />' +
+            '<label>所属分类</label>' +
+            '<select id="f-typeid" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid var(--border);color:var(--text);padding:0.5rem;border-radius:4px;font-size:0.82rem;">' +
+                typeData.map(function(t){ var sel=(ex.llm_type_config_id===t.id||(!isEdit&&activeType&&activeType.id===t.id))?' selected':''; return '<option value="'+t.id+'"'+sel+'>'+esc(t.name)+'</option>'; }).join('') +
+            '</select>' +
+            '<label>调用地址</label>' +
+            '<input id="f-url" value="' + esc(ex.llm_url||'') + '" placeholder="https://api.deepseek.com/v1" maxlength="500" />' +
+            '<label>调用 Key</label>' +
+            '<input id="f-key" value="' + esc(ex.llm_key||'') + '" placeholder="sk-..." maxlength="500" />' +
+            '<label>描述</label>' +
+            '<textarea id="f-desc" rows="3" placeholder="可选描述">' + esc(ex.llm_description||'') + '</textarea>' +
+            '<div class="btn-row">' +
+                '<button class="btn btn-accent" onclick="' + (isEdit?'updCfg(\x27'+cfgId+'\x27)':'addCfg()') + '">💾 保存</button>' +
+                '<button class="btn" onclick="closeModal()">取消</button>' +
+            '</div>';
+        document.getElementById('modalOverlay').style.display = 'flex';
+    })();
+}
+
+async function addCfg(){
+    var n = document.getElementById('f-name').value.trim();
+    if(!n){ alert('请输入名称'); return; }
+    var r = await fetch(API_CFG, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'',name:n,llm_model:document.getElementById('f-model').value.trim()||null,llm_type_config_id:document.getElementById('f-typeid').value,llm_url:document.getElementById('f-url').value.trim()||null,llm_key:document.getElementById('f-key').value.trim()||null,llm_description:document.getElementById('f-desc').value.trim()||null}),cache:'no-cache'});
+    if(!r.ok){ alert('失败'); return; }
+    closeModal(); if(activeType) await loadConfigs(activeType.id);
+}
+
+async function updCfg(id){
+    var n = document.getElementById('f-name').value.trim();
+    if(!n){ alert('请输入名称'); return; }
+    var r = await fetch(API_CFG+'/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,llm_model:document.getElementById('f-model').value.trim()||null,llm_type_config_id:document.getElementById('f-typeid').value,llm_url:document.getElementById('f-url').value.trim()||null,llm_key:document.getElementById('f-key').value.trim()||null,llm_description:document.getElementById('f-desc').value.trim()||null}),cache:'no-cache'});
+    if(!r.ok){ alert('失败'); return; }
+    closeModal(); if(activeType) await loadConfigs(activeType.id);
+}
+
+async function delCfg(id){
+    if(!confirm('确定删除？')) return;
+    await fetch(API_CFG+'/'+id+'?soft=true', {method:'DELETE',cache:'no-cache'});
+    if(activeType) await loadConfigs(activeType.id);
+}
+
+function closeModal(){ document.getElementById('modalOverlay').style.display='none'; }
+</script>
+{% endblock %}

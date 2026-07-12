@@ -1,0 +1,560 @@
+{% extends "base.html" %}
+{% block title %}数据管理 — OntoL{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.dm-layout { display: flex; height: calc(100vh - 60px); background: #070b24; }
+
+/* ── 左侧分类栏 ── */
+.dm-sidebar {
+    width: 220px; min-width: 220px;
+    background: rgba(10,15,40,0.96); border-right: 1px solid var(--border);
+    padding: 0.8rem 0; display: flex; flex-direction: column; gap: 0.1rem;
+    overflow-y: auto;
+}
+.dm-sidebar::-webkit-scrollbar { width: 3px; }
+.dm-sidebar::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.1); border-radius: 2px; }
+.dm-sidebar .sidebar-title {
+    font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.08em; padding: 0.5rem 1rem 0.3rem;
+}
+.dm-sidebar-item {
+    padding: 0.55rem 1rem; cursor: pointer; font-size: 0.8rem; color: var(--text-dim);
+    border-left: 2px solid transparent; transition: all 0.15s;
+    display: flex; align-items: center; gap: 0.5rem;
+}
+.dm-sidebar-item:hover { color: #fff; background: rgba(0,212,255,0.04); }
+.dm-sidebar-item.active { color: var(--accent); background: rgba(0,212,255,0.08); border-left-color: var(--accent); }
+.dm-sidebar-item .count { font-size: 0.65rem; padding: 0.1rem 0.45rem; border-radius: 8px; background: rgba(0,212,255,0.1); margin-left: auto; }
+.dm-sidebar-item .sys-tag { font-size: 0.55rem; color: #f59e0b; margin-left: 0.2rem; }
+.dm-sidebar-divider { height: 1px; background: var(--border); margin: 0.4rem 0.8rem; }
+
+/* ── 右侧内容区 ── */
+.dm-content { flex: 1; overflow-y: auto; padding: 1.2rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.dm-content::-webkit-scrollbar { width: 4px; }
+.dm-content::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.1); border-radius: 2px; }
+
+.dm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+.dm-header h2 { font-size: 1.1rem; margin: 0; background: none; -webkit-text-fill-color: #e8ecf4; display: flex; align-items: center; gap: 0.5rem; }
+.dm-header h2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--primary-glow); }
+
+/* ── 卡片网格 ── */
+.dm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0.8rem; }
+.dm-card { background: rgba(17,24,72,0.7); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; cursor: pointer; transition: all 0.15s; }
+.dm-card:hover { border-color: rgba(0,212,255,0.35); box-shadow: 0 4px 16px rgba(0,0,0,0.3); transform: translateY(-1px); }
+.dm-card .card-title { font-size: 0.9rem; color: #e8ecf4; font-weight: 600; margin-bottom: 0.4rem; }
+.dm-card .card-meta { font-size: 0.72rem; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; }
+.dm-card .card-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
+.dm-card .card-tag { font-size: 0.62rem; padding: 0.1rem 0.5rem; border-radius: 10px; background: rgba(0,212,255,0.08); color: var(--accent); }
+.dm-card .card-tag.warn { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.dm-card .card-tag.success { background: rgba(34,197,94,0.1); color: #22c55e; }
+.dm-card .card-tag.danger { background: rgba(239,68,68,0.1); color: #ef4444; }
+
+.dm-card.add-card { border-style: dashed; border-color: rgba(0,212,255,0.2); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 0.4rem; min-height: 140px; color: var(--text-dim); }
+.dm-card.add-card:hover { border-color: rgba(0,212,255,0.5); background: rgba(0,212,255,0.04); }
+.dm-card.add-card .add-icon { font-size: 2rem; opacity: 0.4; }
+
+/* ── 弹窗 ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 300; display: flex; align-items: center; justify-content: center; }
+.modal-box { background: rgba(17,24,72,0.98); border: 1px solid rgba(0,212,255,0.25); border-radius: 10px; padding: 1.5rem; width: 560px; max-width: 94%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+.modal-box h4 { color: #fff; margin-bottom: 0.8rem; font-size: 0.95rem; }
+.modal-box label { display: block; font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.15rem; margin-top: 0.5rem; }
+.modal-box input, .modal-box textarea, .modal-box select { width: 100%; margin-bottom: 0.2rem; font-size: 0.8rem; }
+.modal-box textarea { resize: vertical; min-height: 80px; font-family: monospace; font-size: 0.75rem; }
+.modal-box .btn-row { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+.modal-box .btn-danger { background: rgba(239,68,68,0.15); border-color: #ef4444; color: #ef4444; }
+
+.json-editor { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; font-family: monospace; font-size: 0.72rem; color: #c0c8e0; min-height: 60px; resize: vertical; width: 100%; outline: none; }
+.json-editor:focus { border-color: var(--accent); }
+
+/* ── 日志弹窗 ── */
+.modal-box-wide { background: rgba(17,24,72,0.98); border: 1px solid rgba(0,212,255,0.25); border-radius: 10px; padding: 1.5rem; width: 960px; max-width: 96%; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+
+.log-filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; background: rgba(10,15,40,0.5); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; }
+.log-filter-bar input { width: auto; min-width: 120px; max-width: 180px; font-size: 0.72rem; margin-bottom: 0 !important; padding: 0.3rem 0.5rem; }
+.log-filter-bar select { width: auto; min-width: 140px; font-size: 0.72rem; margin-bottom: 0 !important; padding: 0.3rem 0.5rem; }
+.log-filter-bar .filter-sep { color: var(--text-dim); font-size: 0.6rem; }
+.log-filter-bar button { font-size: 0.7rem; padding: 0.3rem 0.7rem; }
+
+.log-stats { display: flex; gap: 1rem; margin-bottom: 0.6rem; font-size: 0.72rem; color: var(--text-dim); }
+.log-stats span strong { color: var(--accent); }
+
+.log-table-wrap { overflow-x: auto; max-height: 50vh; overflow-y: auto; }
+.log-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.log-table th { background: rgba(10,15,40,0.6); color: var(--text-dim); font-weight: 600; padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+.log-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid rgba(255,255,255,0.04); color: #c0c8e0; }
+.log-table tr:hover td { background: rgba(0,212,255,0.03); }
+.log-table .cell-mono { font-family: monospace; font-size: 0.68rem; color: var(--accent); }
+.log-table .cell-empty { color: var(--text-dim); font-style: italic; }
+
+.log-pagination { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: 0.8rem; font-size: 0.72rem; color: var(--text-dim); }
+.log-pagination button { font-size: 0.68rem; padding: 0.25rem 0.6rem; min-width: 36px; }
+.log-pagination button:disabled { opacity: 0.3; cursor: default; }
+.log-pagination .page-info { padding: 0 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dm-layout">
+    <!-- 左侧分类 -->
+    <div class="dm-sidebar" id="dmSidebar">
+        <div class="sidebar-title">接口分类</div>
+        <div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:0.75rem;">加载中...</div>
+    </div>
+
+    <!-- 右侧内容 -->
+    <div class="dm-content" id="dmContent">
+        <div style="text-align:center;padding:3rem;color:var(--text-dim);">加载中...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const API = '/api/v1/datamanage';
+let currentTypeId = '_all';  // '_all' = 全部, 或具体 type id
+let allTypes = [];
+let allDatasources = [];
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function dmGet(path) {
+    const r = await fetch(API + path);
+    if (!r.ok) { const t = await r.json(); throw new Error(t.detail || r.statusText); }
+    return r.json();
+}
+
+async function dmPost(path, data) {
+    const r = await fetch(API + path, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    if (!r.ok) { const t = await r.json(); throw new Error(t.detail || r.statusText); }
+    return r.json();
+}
+
+async function dmPut(path, data) {
+    const r = await fetch(API + path, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    if (!r.ok) { const t = await r.json(); throw new Error(t.detail || r.statusText); }
+    return r.json();
+}
+
+async function dmDel(path) {
+    const r = await fetch(API + path, { method: 'DELETE' });
+    if (!r.ok) { const t = await r.json(); throw new Error(t.detail || r.statusText); }
+    return r.json();
+}
+
+// ====================================================================
+// 初始化
+// ====================================================================
+
+async function init() {
+    try {
+        const [types, dss] = await Promise.all([
+            dmGet('/datasource-types'),
+            dmGet('/datasources')
+        ]);
+        allTypes = types;
+        allDatasources = dss;
+    } catch(e) {
+        document.getElementById('dmSidebar').innerHTML = `<div style="color:#ef4444;padding:1rem;font-size:0.75rem;">❌ ${escHtml(e.message)}</div>`;
+        return;
+    }
+    renderSidebar();
+    selectType('_all');
+}
+
+function renderSidebar() {
+    const el = document.getElementById('dmSidebar');
+    // 统计每个类型下的数据源数量
+    const counts = {};
+    for (const ds of allDatasources) {
+        const tid = ds.ontol_datasource_type_id || '_none';
+        counts[tid] = (counts[tid] || 0) + 1;
+    }
+    const totalCount = allDatasources.length;
+
+    const items = allTypes.map(t => {
+        const cnt = counts[t.id] || 0;
+        const sys = t.is_system === '1' ? '<span class="sys-tag">🔒</span>' : '';
+        return { id: t.id, name: escHtml(t.name), count: cnt, isSystem: t.is_system === '1', sysHtml: sys };
+    });
+
+    el.innerHTML = `
+        <div class="sidebar-title">接口分类</div>
+        <div class="dm-sidebar-item ${currentTypeId === '_all' ? 'active' : ''}" data-tid="_all" onclick="selectType('_all')">
+            📋 全部 <span class="count">${totalCount}</span>
+        </div>
+        ${items.map(t => `
+            <div class="dm-sidebar-item ${currentTypeId === t.id ? 'active' : ''}" data-tid="${t.id}" onclick="selectType('${t.id}')">
+                🗄 ${t.name}${t.sysHtml} <span class="count">${t.count}</span>
+            </div>
+        `).join('')}
+        <div class="dm-sidebar-divider"></div>
+        <div class="dm-sidebar-item" style="color:var(--accent);" onclick="showTypeForm()">
+            ＋ 新增分类
+        </div>
+        <div class="dm-sidebar-divider"></div>
+        <div class="dm-sidebar-item" style="color:#f59e0b;" onclick="showLogModal()">
+            📋 数据源日志
+        </div>
+    `;
+}
+
+function selectType(tid) {
+    currentTypeId = tid;
+    // 更新侧边栏高亮
+    document.querySelectorAll('.dm-sidebar-item[data-tid]').forEach(el => {
+        el.classList.toggle('active', el.dataset.tid === tid);
+    });
+    document.querySelector('.dm-sidebar-item[onclick*="_all"]')?.classList.toggle('active', tid === '_all');
+    renderCards();
+}
+
+// ====================================================================
+// 右侧卡片
+// ====================================================================
+
+function renderCards() {
+    const el = document.getElementById('dmContent');
+    // 按类型筛选
+    let filtered = allDatasources;
+    let typeLabel = '全部';
+    if (currentTypeId !== '_all') {
+        filtered = allDatasources.filter(ds => ds.ontol_datasource_type_id === currentTypeId);
+        const t = allTypes.find(t => t.id === currentTypeId);
+        typeLabel = t ? t.name : currentTypeId;
+    }
+
+    el.innerHTML = `
+        <div class="dm-header">
+            <h2><span class="dot"></span> ${escHtml(typeLabel)} 数据源 <span style="font-size:0.7rem;color:var(--text-dim);">(${filtered.length})</span></h2>
+            <div style="display:flex;gap:0.5rem;">
+                <button class="btn" style="border-color:rgba(0,212,255,0.15);color:var(--accent);font-size:0.72rem;" onclick="showTypeForm()">＋ 新增分类</button>
+            </div>
+        </div>
+        <div class="dm-cards">
+            <div class="dm-card add-card" onclick="showDatasourceForm()">
+                <div class="add-icon">＋</div>
+                <div>新增数据源</div>
+            </div>
+            ${filtered.length === 0 ? '<div style="grid-column:1/-1;text-align:center;padding:3rem;color:var(--text-dim);">暂无数据源</div>' : ''}
+            ${filtered.map(ds => {
+                const typeName = allTypes.find(t => t.id === ds.ontol_datasource_type_id);
+                const typeLabel2 = typeName ? typeName.name : (ds.ontol_datasource_type_id || '未分类');
+                return `
+                <div class="dm-card" onclick="showDatasourceForm(${ds.id})">
+                    <div class="card-title">${escHtml(ds.name)}</div>
+                    <div class="card-meta">
+                        <span>🗄 ${escHtml(typeLabel2)}</span>
+                        <span>${escHtml(ds.jdbc_url || '—')}</span>
+                    </div>
+                    <div class="card-tags">
+                        <span class="card-tag">${escHtml(ds.username)}</span>
+                        <span class="card-tag ${ds.status === 1 ? 'success' : 'danger'}">${ds.status === 1 ? '● 启用' : '○ 禁用'}</span>
+                        <span class="card-tag">${(ds.create_time||'').substring(0,10)}</span>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`;
+}
+
+// ====================================================================
+// 数据源分类弹窗 (CRUD)
+// ====================================================================
+
+function showTypeForm(id) {
+    const isEdit = !!id;
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `<div class="modal-box"><div style="text-align:center;padding:1rem;">加载中...</div></div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const loadForm = async () => {
+        let data = { name: '', datasource_description: '', is_system: '0' };
+        let isSys = false;
+        if (isEdit) {
+            try { data = await dmGet('/datasource-types/' + encodeURIComponent(id)); } catch(e) { alert(e.message); modal.remove(); return; }
+            isSys = data.is_system === '1';
+        }
+        modal.querySelector('.modal-box').innerHTML = `
+            <h4>${isEdit ? '✏ 编辑分类' : '＋ 新增分类'}</h4>
+            <label>分类名称 <span style="color:#ef4444;">*</span></label>
+            <input id="f-tname" value="${escHtml(data.name)}" ${isSys ? 'readonly style="opacity:0.5;"' : ''} />
+            ${isSys ? '<div style="font-size:0.65rem;color:#f59e0b;margin-top:2px;">🔒 系统预设分类，名称不可修改</div>' : ''}
+            <label>描述说明</label>
+            <input id="f-tdesc" value="${escHtml(data.datasource_description || '')}" ${isSys ? 'readonly style="opacity:0.5;"' : ''} />
+            ${!isEdit ? `<label>类型</label><select id="f-tsys"><option value="0">自定义</option><option value="1">系统预设</option></select>` : ''}
+            <div class="btn-row">
+                ${isEdit && !isSys ? '<button class="btn btn-danger" onclick="deleteType(\''+escHtml(id)+'\')">🗑 删除</button>' : ''}
+                <div style="flex:1;"></div>
+                <button class="btn" style="border-color:var(--border);color:var(--text-dim);" onclick="this.closest('.modal-overlay').remove()">取消</button>
+                <button class="btn" onclick="saveType('${isEdit ? escHtml(id) : ''}', ${isSys})">💾 保存</button>
+            </div>`;
+    };
+    loadForm();
+}
+
+async function saveType(id, isSys) {
+    if (isSys) { document.querySelector('.modal-overlay')?.remove(); return; }
+    const data = {
+        name: document.getElementById('f-tname')?.value?.trim() || '',
+        datasource_description: document.getElementById('f-tdesc')?.value?.trim() || '',
+    };
+    if (!id) data.is_system = document.getElementById('f-tsys')?.value || '0';
+    if (!data.name) { alert('分类名称不能为空'); return; }
+    try {
+        if (id) { await dmPut('/datasource-types/' + encodeURIComponent(id), data); }
+        else { await dmPost('/datasource-types', data); }
+        document.querySelector('.modal-overlay')?.remove();
+        await refreshAll();
+    } catch(e) { alert('保存失败: ' + e.message); }
+}
+
+async function deleteType(id) {
+    if (!confirm('确定删除此分类吗？')) return;
+    try {
+        await dmDel('/datasource-types/' + encodeURIComponent(id));
+        document.querySelector('.modal-overlay')?.remove();
+        await refreshAll();
+    } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// ====================================================================
+// 数据源弹窗 (CRUD)
+// ====================================================================
+
+function showDatasourceForm(id) {
+    const isEdit = !!id;
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `<div class="modal-box"><div style="text-align:center;padding:1rem;">加载中...</div></div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const loadForm = async () => {
+        let data = { name:'', ontol_datasource_type_id:'', driver_class:'', jdbc_url:'', username:'', password_cipher:'', config_extra:'{}', status:1, created_by:'' };
+        if (isEdit) {
+            try { data = await dmGet('/datasources/' + id); } catch(e) { alert(e.message); modal.remove(); return; }
+        }
+        // 默认选中当前分类
+        if (!isEdit && currentTypeId !== '_all') data.ontol_datasource_type_id = currentTypeId;
+
+        const typeOpts = allTypes.map(t =>
+            `<option value="${t.id}" ${data.ontol_datasource_type_id === t.id ? 'selected' : ''}>${escHtml(t.name)}${t.is_system === '1' ? ' 🔒' : ''}</option>`
+        ).join('');
+
+        modal.querySelector('.modal-box').innerHTML = `
+            <h4>${isEdit ? '✏ 编辑数据源' : '＋ 新增数据源'}</h4>
+            <label>名称 <span style="color:#ef4444;">*</span></label>
+            <input id="f-name" value="${escHtml(data.name)}" />
+            <label>分类</label>
+            <select id="f-typeid"><option value="">— 请选择 —</option>${typeOpts}</select>
+            <label>JDBC 驱动类名</label>
+            <input id="f-driver" value="${escHtml(data.driver_class||'')}" />
+            <label>连接字符串</label>
+            <input id="f-jdbc" value="${escHtml(data.jdbc_url||'')}" />
+            <label>用户名</label>
+            <input id="f-user" value="${escHtml(data.username||'')}" />
+            <label>加密密码</label>
+            <input id="f-pwd" value="${escHtml(data.password_cipher||'')}" type="password" />
+            <label>额外配置 (JSON)</label>
+            <textarea class="json-editor" id="f-config" rows="2">${escHtml(data.config_extra||'{}')}</textarea>
+            <label>状态</label>
+            <select id="f-status"><option value="1" ${data.status===1?'selected':''}>启用</option><option value="0" ${data.status===0?'selected':''}>禁用</option></select>
+            <div class="btn-row">
+                ${isEdit ? '<button class="btn btn-danger" onclick="deleteDatasource('+id+')">🗑 删除</button>' : ''}
+                <div style="flex:1;"></div>
+                <button class="btn" style="border-color:var(--border);color:var(--text-dim);" onclick="this.closest('.modal-overlay').remove()">取消</button>
+                <button class="btn" onclick="saveDatasource(${id||0})">💾 保存</button>
+            </div>`;
+    };
+    loadForm();
+}
+
+async function saveDatasource(id) {
+    const data = {
+        name: document.getElementById('f-name')?.value?.trim() || '',
+        ontol_datasource_type_id: document.getElementById('f-typeid')?.value || '',
+        driver_class: document.getElementById('f-driver')?.value?.trim() || '',
+        jdbc_url: document.getElementById('f-jdbc')?.value?.trim() || '',
+        username: document.getElementById('f-user')?.value?.trim() || '',
+        password_cipher: document.getElementById('f-pwd')?.value?.trim() || '',
+        config_extra: document.getElementById('f-config')?.value?.trim() || '{}',
+        status: parseInt(document.getElementById('f-status')?.value) || 1,
+    };
+    if (!data.name) { alert('名称不能为空'); return; }
+    try {
+        if (id) { await dmPut('/datasources/' + id, data); }
+        else { await dmPost('/datasources', data); }
+        document.querySelector('.modal-overlay')?.remove();
+        await refreshAll();
+    } catch(e) { alert('保存失败: ' + e.message); }
+}
+
+async function deleteDatasource(id) {
+    if (!confirm('确定删除此数据源吗？')) return;
+    try { await dmDel('/datasources/' + id); document.querySelector('.modal-overlay')?.remove(); await refreshAll(); }
+    catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// ====================================================================
+// 数据源日志弹窗
+// ====================================================================
+
+let logPage = 1;
+let logFilters = { datasource_id: '', biz_id: '', batch_no: '', date_from: '', date_to: '' };
+
+async function showLogModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `<div class="modal-box-wide"><div style="text-align:center;padding:1rem;">加载中...</div></div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    // 加载数据源选项（供筛选下拉用）
+    let dsOptions = '';
+    try {
+        if (allDatasources.length === 0) allDatasources = await dmGet('/datasources');
+        dsOptions = allDatasources.map(ds =>
+            `<option value="${ds.id}">${escHtml(ds.name || ds.id)}</option>`
+        ).join('');
+    } catch(e) { /* ignore */ }
+
+    logPage = 1;
+    logFilters = { datasource_id: '', biz_id: '', batch_no: '', date_from: '', date_to: '' };
+
+    modal.querySelector('.modal-box-wide').innerHTML = `
+        <h4>📋 数据源日志</h4>
+        <div class="log-filter-bar" id="logFilterBar">
+            <select id="lf-dsid" style="min-width:160px;">
+                <option value="">全部数据源</option>
+                ${dsOptions}
+            </select>
+            <input id="lf-biz" placeholder="业务单号" />
+            <input id="lf-batch" placeholder="批次号" />
+            <input id="lf-date-from" type="date" title="开始日期" style="max-width:130px;" />
+            <span class="filter-sep">—</span>
+            <input id="lf-date-to" type="date" title="结束日期" style="max-width:130px;" />
+            <button class="btn" style="border-color:var(--accent);color:var(--accent);" onclick="applyLogFilter()">🔍 查询</button>
+            <button class="btn" style="border-color:var(--border);color:var(--text-dim);" onclick="resetLogFilter()">↺ 重置</button>
+        </div>
+        <div class="log-stats" id="logStats">加载中...</div>
+        <div class="log-table-wrap" id="logTableWrap"><div style="text-align:center;padding:1rem;color:var(--text-dim);">加载中...</div></div>
+        <div class="log-pagination" id="logPagination"></div>
+        <div class="btn-row" style="margin-top:0.8rem;">
+            <button class="btn" style="border-color:var(--border);color:var(--text-dim);" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+        </div>`;
+
+    await loadLogData();
+}
+
+async function loadLogData() {
+    const params = new URLSearchParams();
+    if (logFilters.datasource_id) params.set('datasource_id', logFilters.datasource_id);
+    if (logFilters.biz_id) params.set('biz_id', logFilters.biz_id);
+    if (logFilters.batch_no) params.set('batch_no', logFilters.batch_no);
+    if (logFilters.date_from) params.set('date_from', logFilters.date_from);
+    if (logFilters.date_to) params.set('date_to', logFilters.date_to);
+    params.set('page', logPage);
+    params.set('page_size', '30');
+
+    try {
+        const [data, stats] = await Promise.all([
+            dmGet('/datasource-logs?' + params.toString()),
+            dmGet('/datasource-logs/stats')
+        ]);
+        renderLogTable(data, stats);
+    } catch(e) {
+        const wrap = document.getElementById('logTableWrap');
+        if (wrap) wrap.innerHTML = `<div style="text-align:center;padding:1rem;color:#ef4444;">❌ ${escHtml(e.message)}</div>`;
+    }
+}
+
+function renderLogTable(data, stats) {
+    // 统计行
+    document.getElementById('logStats').innerHTML = `
+        <span>📊 总日志数: <strong>${stats.total}</strong></span>
+        <span>📅 今日: <strong>${stats.today}</strong></span>
+        <span>📄 当前页: <strong>${data.data.length}</strong> 条</span>
+    `;
+
+    // 表格
+    const rows = data.data;
+    if (rows.length === 0) {
+        document.getElementById('logTableWrap').innerHTML =
+            '<div style="text-align:center;padding:2rem;color:var(--text-dim);">暂无日志数据</div>';
+    } else {
+        document.getElementById('logTableWrap').innerHTML = `
+        <table class="log-table">
+            <thead><tr>
+                <th>数据源</th><th>业务单号</th><th>批次号</th><th>创建时间</th>
+            </tr></thead>
+            <tbody>${rows.map(r => `
+                <tr>
+                    <td>${escHtml(r.datasource_name || r.ontol_datasource_id || '—')}</td>
+                    <td class="cell-mono">${escHtml(r.biz_id || '') || '<span class="cell-empty">—</span>'}</td>
+                    <td>${escHtml(r.batch_no || '') || '<span class="cell-empty">—</span>'}</td>
+                    <td>${escHtml(r.create_time || '')}</td>
+                </tr>`).join('')}</tbody>
+        </table>`;
+    }
+
+    // 分页
+    const pg = document.getElementById('logPagination');
+    pg.innerHTML = `
+        <button class="btn" ${logPage <= 1 ? 'disabled' : ''} onclick="logGoPage(${logPage - 1})">‹ 上一页</button>
+        <span class="page-info">${data.page} / ${data.total_pages}</span>
+        <button class="btn" ${logPage >= data.total_pages ? 'disabled' : ''} onclick="logGoPage(${logPage + 1})">下一页 ›</button>
+    `;
+}
+
+function logGoPage(p) {
+    logPage = p;
+    loadLogData();
+}
+
+function applyLogFilter() {
+    logFilters.datasource_id = document.getElementById('lf-dsid')?.value || '';
+    logFilters.biz_id = document.getElementById('lf-biz')?.value?.trim() || '';
+    logFilters.batch_no = document.getElementById('lf-batch')?.value?.trim() || '';
+    logFilters.date_from = document.getElementById('lf-date-from')?.value || '';
+    logFilters.date_to = document.getElementById('lf-date-to')?.value || '';
+    logPage = 1;
+    loadLogData();
+}
+
+function resetLogFilter() {
+    const els = ['lf-dsid', 'lf-biz', 'lf-batch', 'lf-date-from', 'lf-date-to'];
+    for (const id of els) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    }
+    logFilters = { datasource_id: '', biz_id: '', batch_no: '', date_from: '', date_to: '' };
+    logPage = 1;
+    loadLogData();
+}
+
+// ====================================================================
+// 刷新
+// ====================================================================
+
+async function refreshAll() {
+    const [types, dss] = await Promise.all([
+        dmGet('/datasource-types'),
+        dmGet('/datasources')
+    ]);
+    allTypes = types;
+    allDatasources = dss;
+    renderSidebar();
+    renderCards();
+}
+
+// ====================================================================
+// 启动
+// ====================================================================
+init();
+</script>
+{% endblock %}

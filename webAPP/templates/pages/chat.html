@@ -1,0 +1,1103 @@
+{% extends "base.html" %}
+
+{% block title %}AI 对话 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ── 整体布局：左侧边栏 + 右侧对话区 ── */
+.chat-app {
+    display: flex;
+    height: calc(100vh - 160px);
+    max-width: 1200px;
+    margin: 0 auto;
+    gap: 0;
+}
+
+/* ── 左侧边栏 ── */
+.chat-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: rgba(10, 15, 40, 0.9);
+    border: 1px solid var(--border);
+    border-right: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 8px 0 0 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.sidebar-header h3 {
+    font-size: 0.9rem;
+    color: var(--accent);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.sidebar-header h3 .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--primary-glow);
+}
+
+.new-chat-btn {
+    width: 100%;
+    padding: 0.55rem 1rem;
+    background: rgba(0, 212, 255, 0.12);
+    color: var(--accent);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+}
+
+.new-chat-btn:hover {
+    background: rgba(0, 212, 255, 0.22);
+    box-shadow: 0 0 12px var(--primary-glow);
+}
+
+.conversation-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.conversation-list::-webkit-scrollbar { width: 3px; }
+.conversation-list::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.1); border-radius: 2px; }
+
+.conv-item {
+    padding: 0.65rem 0.75rem;
+    margin-bottom: 0.25rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.conv-item:hover {
+    background: rgba(0, 212, 255, 0.06);
+    border-color: rgba(0, 212, 255, 0.12);
+}
+
+.conv-item.active {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.08);
+}
+
+.conv-item .conv-title {
+    font-size: 0.82rem;
+    color: #e8ecf4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 24px;
+}
+
+.conv-item .conv-meta {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+}
+
+.conv-item .conv-delete {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    line-height: 1;
+}
+
+.conv-item:hover .conv-delete { opacity: 1; }
+.conv-item .conv-delete:hover { color: #ef4444; }
+
+.sidebar-footer {
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-align: center;
+}
+
+/* ── 右侧主对话区 ── */
+.chat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    background: rgba(10, 15, 40, 0.7);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.chat-main-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.chat-main-header .conv-label {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.chat-main-header .conv-label .uuid {
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: rgba(0, 212, 255, 0.5);
+}
+
+/* ── 消息区域 ── */
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.1); border-radius: 2px; }
+
+/* 空状态 */
+.chat-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-dim);
+    text-align: center;
+    gap: 0.5rem;
+}
+
+.chat-empty .empty-icon { font-size: 3rem; opacity: 0.3; }
+.chat-empty .empty-text { font-size: 0.9rem; }
+.chat-empty .empty-hint { font-size: 0.75rem; opacity: 0.6; }
+
+/* ── 消息气泡 ── */
+.msg { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; max-width: 85%; line-height: 1.7; }
+.msg.user { background: rgba(0, 212, 255, 0.2); color: #fff; margin-left: auto; border: 1px solid rgba(0, 212, 255, 0.25); }
+.msg.assistant { background: rgba(17, 24, 72, 0.8); color: #e8ecf4; border: 1px solid var(--border); }
+.msg .role { font-size: 0.75rem; font-weight: 700; margin-bottom: 0.25rem; opacity: 0.5; }
+.msg .content { white-space: pre-wrap; word-break: break-word; }
+.msg .content p { margin: 0.4rem 0; }
+.msg .content h2,.msg .content h3 { color: var(--accent); margin: 0.8rem 0 0.3rem; }
+.msg .content code { background: rgba(0,212,255,0.1); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
+.msg .content pre { background: rgba(0,0,0,0.3); padding: 0.6rem; border-radius: 6px; overflow-x: auto; font-size: 0.78rem; border: 1px solid rgba(0,212,255,0.1); }
+
+/* ── 推理步骤指示器 ── */
+.pipeline-steps { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.pipeline-step { font-size: 0.68rem; padding: 0.15rem 0.5rem; border-radius: 10px;
+    background: rgba(0,212,255,0.06); border: 1px solid rgba(0,212,255,0.15); color: var(--text-dim); }
+.pipeline-step.active { background: rgba(0,212,255,0.15); border-color: var(--accent); color: var(--accent); animation: pulse 1.5s infinite; }
+.pipeline-step.done { background: rgba(34,197,94,0.12); border-color: #22c55e; color: #22c55e; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 工具调用卡片 ── */
+.tool-call { margin: 0.4rem 0; border: 1px solid rgba(245,158,11,0.2); border-radius: 6px; overflow: hidden; font-size: 0.75rem; }
+.tool-call-header { padding: 0.3rem 0.6rem; background: rgba(245,158,11,0.1); cursor: pointer;
+    display: flex; align-items: center; gap: 0.4rem; }
+.tool-call-header .tool-icon { font-size: 0.85rem; }
+.tool-call-header .tool-name { color: #f59e0b; font-weight: 600; }
+.tool-call-header .tool-args { color: var(--text-dim); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex:1; }
+.tool-call-body { padding: 0.4rem 0.6rem; background: rgba(0,0,0,0.2); max-height: 160px; overflow-y: auto;
+    font-family: monospace; font-size: 0.7rem; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; display: none; }
+.tool-call.open .tool-call-body { display: block; }
+.tool-call-body::-webkit-scrollbar { width: 3px; }
+.tool-call-body::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+
+/* ── 输入区域 ── */
+.chat-input-wrap {
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.model-bar { display: flex; gap: 1rem; align-items: center; justify-content: center; margin-bottom: 0.6rem; font-size: 0.82rem; color: #e8ecf4; }
+.model-bar select { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 4px;
+    background: rgba(10, 15, 40, 0.8); color: #e8ecf4; font-size: 0.8rem; }
+
+.chat-input-area { display: flex; gap: 0.5rem; }
+.chat-input-area textarea { flex: 1; padding: 0.75rem; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 1rem; resize: none; font-family: inherit;
+    background: rgba(10, 15, 40, 0.8); color: #e8ecf4; }
+.chat-input-area textarea:focus { border-color: var(--accent); box-shadow: 0 0 10px var(--primary-glow); outline: none; }
+.chat-input-area button { padding: 0.75rem 1.5rem; background: rgba(0, 212, 255, 0.15); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 8px; font-size: 1rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+.chat-input-area button:hover { background: rgba(0, 212, 255, 0.25); box-shadow: 0 0 16px var(--primary-glow); }
+.chat-input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+.chat-input-area button.stop { background: rgba(239, 68, 68, 0.15); border-color: #ef4444; color: #ef4444; display: none; }
+
+.streaming-indicator { display: none; color: #00d4ff; font-size: 0.75rem; margin-left: 0.5rem; }
+
+/* ── 推理机面板 ── */
+.reasoner-panel { position: fixed; right: -440px; top: 60px; width: 440px; height: calc(100vh - 60px);
+    background: rgba(10, 15, 40, 0.98); border-left: 1px solid rgba(0, 212, 255, 0.35);
+    z-index: 101; padding: 1.5rem; overflow-y: auto; transition: right 0.35s ease;
+    backdrop-filter: blur(12px); }
+.reasoner-panel.open { right: 0; }
+.reasoner-panel h3 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.05rem;
+    display: flex; align-items: center; gap: 0.4rem; }
+.reasoner-panel h3 .dot { width: 8px; height: 8px; border-radius: 50%; background: #00d4ff;
+    box-shadow: 0 0 8px rgba(0,212,255,0.5); }
+.reasoner-panel .close-btn { position: absolute; top: 0.6rem; right: 0.8rem; background: none;
+    border: none; color: #6988a0; font-size: 1.2rem; cursor: pointer; }
+.reasoner-panel .close-btn:hover { color: #00d4ff; }
+.reasoner-panel .reasoner-params { background: rgba(0,212,255,0.06);
+    border: 1px solid rgba(0,212,255,0.15); border-radius: 6px; padding: 0.6rem 0.8rem;
+    margin-bottom: 1rem; font-size: 0.78rem; color: #c0c8e0; }
+.reasoner-panel .reasoner-params span { color: #00d4ff; font-weight: 600; }
+.reasoner-panel .reasoner-result { background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(0,212,255,0.12); border-radius: 6px; padding: 1rem;
+    white-space: pre-wrap; word-break: break-all; font-size: 0.82rem; line-height: 1.7;
+    color: #c0c8e0; max-height: calc(100vh - 280px); overflow-y: auto; }
+.reasoner-panel .reasoner-loading { display: flex; align-items: center; gap: 0.6rem;
+    color: #00d4ff; padding: 2rem 0; justify-content: center; }
+.reasoner-panel .reasoner-error { color: #ef4444; font-size: 0.8rem; padding: 0.6rem;
+    background: rgba(239,68,68,0.06); border-radius: 6px; margin: 0.6rem 0; }
+.reasoner-panel .reasoner-empty { color: #6988a0; font-size: 0.82rem; padding: 1rem 0; }
+.reasoner-panel .reasoner-list { list-style: none; padding: 0; margin: 0; }
+.reasoner-panel .reasoner-list li { padding: 0.3rem 0; border-bottom: 1px solid rgba(0,212,255,0.08);
+    color: #c0c8e0; font-size: 0.78rem; }
+.reasoner-panel .reasoner-list li .call-time { color: #6988a0; font-size: 0.68rem; }
+
+/* ── 确认对话框 ── */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6); z-index: 200;
+    display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+    background: rgba(17, 24, 72, 0.98);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 10px;
+    padding: 1.5rem;
+    max-width: 360px;
+    width: 90%;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.modal-box h4 { color: #fff; margin-bottom: 0.75rem; }
+.modal-box p { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.25rem; }
+.modal-box .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.modal-box .modal-actions button { padding: 0.45rem 1rem; font-size: 0.8rem; }
+.modal-box .btn-danger { background: rgba(239,68,68,0.15); border-color: #ef4444; color: #ef4444; }
+.modal-box .btn-danger:hover { background: rgba(239,68,68,0.25); }
+.modal-box .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-dim); }
+
+/* ── 场景选择器 ── */
+.scene-selector { max-height: 300px; overflow-y: auto; margin: 0.75rem 0; }
+.scene-selector::-webkit-scrollbar { width: 3px; }
+.scene-selector::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.1); border-radius: 2px; }
+.scene-check-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: 6px; cursor: pointer; transition: all 0.15s; border: 1px solid transparent; margin-bottom: 0.2rem; }
+.scene-check-item:hover { background: rgba(0,212,255,0.05); border-color: rgba(0,212,255,0.1); }
+.scene-check-item.selected { background: rgba(0,212,255,0.08); border-color: rgba(0,212,255,0.25); }
+.scene-check-item input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+.scene-check-item .sc-info { flex: 1; }
+.scene-check-item .sc-name { font-size: 0.85rem; color: #e8ecf4; }
+.scene-check-item .sc-desc { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.1rem; }
+.scene-check-item .sc-badge { font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: rgba(124,58,237,0.2); color: #c4b5fd; }
+.scene-tag { display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.5rem; border-radius: 8px; background: rgba(124,58,237,0.15); color: #c4b5fd; margin-right: 0.3rem; margin-bottom: 0.2rem; }
+
+/* ── 对话列表场景名 ── */
+.conv-item .conv-scenes { font-size: 0.65rem; color: #c4b5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.15rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-app">
+    <!-- ═══ 左侧边栏：对话列表 ═══ -->
+    <aside class="chat-sidebar">
+        <div class="sidebar-header">
+            <h3><span class="dot"></span> 对话记录</h3>
+            <button class="new-chat-btn" onclick="newConversation()">
+                <span>＋</span> 新建对话
+            </button>
+        </div>
+        <div class="conversation-list" id="conversationList">
+            <!-- JS 动态渲染 -->
+        </div>
+        <div class="sidebar-footer">
+            <span id="convCount">0 个对话</span> · 数据存于浏览器
+        </div>
+    </aside>
+
+    <!-- ═══ 右侧主对话区 ═══ -->
+    <div class="chat-main">
+        <div class="chat-main-header">
+            <div class="conv-label">
+                当前对话 <span class="uuid" id="currentConvId">—</span>
+            </div>
+            <div>
+                <span id="streaming-indicator" class="streaming-indicator">● 生成中...</span>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="messages">
+            <div class="chat-empty" id="chatEmpty">
+                <div class="empty-icon">💬</div>
+                <div class="empty-text">选择或创建一个对话开始聊天</div>
+                <div class="empty-hint">点击左侧「＋ 新建对话」或选择历史对话</div>
+            </div>
+        </div>
+
+        <div class="chat-input-wrap">
+            <div class="model-bar">
+                <label>模型:
+                    <select id="model-select">
+                        {% for group in model_groups %}
+                        <optgroup label="{{ group.label }}">
+                            {% for m in group.models %}
+                            <option value="{{ m.id }}" {% if m.id == default_model %}selected{% endif %}>
+                                {{ m.name }}
+                            </option>
+                            {% endfor %}
+                        </optgroup>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="chat-input-area">
+                <textarea id="input" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+                <button id="send-btn" onclick="send()">发送</button>
+                <button id="stop-btn" class="stop" onclick="stop()">停止</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 推理机面板 -->
+<div id="reasonerPanel" class="reasoner-panel">
+    <button class="close-btn" onclick="closeReasonerPanel()">✕</button>
+    <div id="reasonerContent">
+        <h3><span class="dot"></span> 推理机调用记录</h3>
+        <p class="reasoner-empty">当 AI 调用推理机时，调用记录将显示在此处</p>
+    </div>
+</div>
+
+<!-- 删除确认对话框 -->
+<div id="deleteModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+        <h4>删除对话</h4>
+        <p id="deleteModalMsg">确定要删除这个对话吗？此操作不可恢复。</p>
+        <div class="modal-actions">
+            <button class="btn-ghost" onclick="closeDeleteModal()">取消</button>
+            <button class="btn-danger" id="deleteConfirmBtn" onclick="confirmDelete()">删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- 场景选择器对话框 -->
+<div id="sceneSelectModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box" style="max-width:460px;">
+        <h4>📋 选择推演场景</h4>
+        <p style="color:var(--text-dim);font-size:0.8rem;">为新建对话选择一个或多个场景（多选）</p>
+        <div class="scene-selector" id="sceneCheckList">
+            <div style="text-align:center;padding:1rem;color:var(--text-dim);">加载场景列表...</div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-ghost" onclick="closeSceneModal()">取消</button>
+            <button class="btn" onclick="confirmNewConversation()" style="background:rgba(0,212,255,0.2);">开始对话</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ═══════════════════════════════════════════════
+//  localStorage 对话存储引擎
+//  - 索引: chat_index → UUID[] (按 updatedAt 降序)
+//  - 数据: chat_{uuid} → {id, title, messages[], createdAt, updatedAt}
+// ═══════════════════════════════════════════════
+
+const STORAGE_PREFIX = 'chat_';
+const INDEX_KEY = 'chat_index';
+
+function generateUUID() {
+    return crypto.randomUUID ? crypto.randomUUID() :
+        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+}
+
+function loadIndex() {
+    try {
+        const raw = localStorage.getItem(INDEX_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch (_) { return []; }
+}
+
+function saveIndex(uuids) {
+    localStorage.setItem(INDEX_KEY, JSON.stringify(uuids));
+}
+
+function loadConversation(uuid) {
+    try {
+        const raw = localStorage.getItem(STORAGE_PREFIX + uuid);
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+}
+
+function saveConversation(conv) {
+    conv.updatedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_PREFIX + conv.id, JSON.stringify(conv));
+    // 更新索引排序
+    const index = loadIndex().filter(id => id !== conv.id);
+    index.unshift(conv.id);
+    saveIndex(index);
+}
+
+async function deleteChatSceneBindings(chatId) {
+    try {
+        const r = await fetch('/api/v1/chat-scenes/' + chatId);
+        if (r.ok) {
+            const rels = await r.json();
+            await Promise.allSettled(rels.map(rel =>
+                fetch('/api/v1/chat-scenes/' + rel.id, { method: 'DELETE' })
+            ));
+        }
+    } catch (_) {}
+}
+
+function deleteConversation(uuid) {
+    // 清理后端场景绑定
+    deleteChatSceneBindings(uuid);
+    // 清理本地存储
+    localStorage.removeItem(STORAGE_PREFIX + uuid);
+    const index = loadIndex().filter(id => id !== uuid);
+    saveIndex(index);
+}
+
+// 从首条用户消息生成标题
+function deriveTitle(messages) {
+    const firstUser = messages.find(m => m.role === 'user');
+    if (!firstUser) return '新对话';
+    const text = String(firstUser.content || '').trim();
+    return text.length > 30 ? text.substring(0, 30) + '…' : text;
+}
+
+function formatTime(iso) {
+    const d = new Date(iso);
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    if (d.toDateString() === now.toDateString()) {
+        return `今天 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) {
+        return `昨天 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+// ═══════════════════════════════════════════════
+//  全局状态
+// ═══════════════════════════════════════════════
+
+let abortController = null;
+let currentConvId = null;        // 当前活跃对话的 UUID
+let currentMessages = [];        // 当前对话的消息数组（运行时）
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
+const stopBtn = document.getElementById('stop-btn');
+const indicator = document.getElementById('streaming-indicator');
+const modelSelect = document.getElementById('model-select');
+
+let PIPELINE_STEPS = ['意图解析','知识检索','推理校验','图遍历','步骤生成','自校验','方案输出'];
+let TOOL_STEP_MAP = {};
+let currentStepIdx = -1;
+let reasonerCalls = [];
+let reasonerCallId = 0;
+let stepsLoaded = false;
+
+// ═══════════════════════════════════════════════
+//  侧边栏渲染
+// ═══════════════════════════════════════════════
+
+let deleteTargetUuid = null;  // 待删除的 UUID
+
+function renderSidebar() {
+    const index = loadIndex();
+    const listEl = document.getElementById('conversationList');
+    const countEl = document.getElementById('convCount');
+
+    countEl.textContent = `${index.length} 个对话`;
+
+    if (index.length === 0) {
+        listEl.innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--text-dim);font-size:0.8rem;">暂无对话记录<br><br>点击上方按钮开始</div>';
+        return;
+    }
+
+    let html = '';
+    for (const uuid of index) {
+        const conv = loadConversation(uuid);
+        if (!conv) continue;  // 脏数据跳过
+        const activeClass = uuid === currentConvId ? ' active' : '';
+        const title = escHtml(conv.title || '新对话');
+        const time = formatTime(conv.updatedAt || conv.createdAt);
+        const msgCount = (conv.messages || []).length;
+        const sceneNames = (conv.sceneNames || []).slice(0, 2).map(s => escHtml(s)).join(' · ');
+        const sceneHint = sceneNames ? `<div class="conv-scenes">📋 ${sceneNames}</div>` : '';
+        html += `
+            <div class="conv-item${activeClass}" onclick="switchConversation('${uuid}')" title="${title}">
+                <span class="conv-title">${title}</span>
+                ${sceneHint}
+                <span class="conv-meta">
+                    <span>${msgCount} 条消息</span>
+                    <span>${time}</span>
+                </span>
+                <button class="conv-delete" onclick="event.stopPropagation(); promptDelete('${uuid}', '${escHtml(title)}')" title="删除">🗑</button>
+            </div>`;
+    }
+    listEl.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+//  对话管理
+// ═══════════════════════════════════════════════
+
+function newConversation() {
+    // 如果有当前对话且为空，不重复创建
+    if (currentConvId) {
+        const conv = loadConversation(currentConvId);
+        if (conv && conv.messages.length === 0) {
+            alert('当前已是空白对话，请直接输入消息开始聊天');
+            return;
+        }
+    }
+    // 打开场景选择器
+    openSceneModal();
+}
+
+// ═══════════════════════════════════════════════
+//  场景选择器
+// ═══════════════════════════════════════════════
+
+let pendingNewConv = null;  // 暂存新对话数据，等待场景选择确认
+
+function openSceneModal() {
+    document.getElementById('sceneSelectModal').style.display = 'flex';
+    const listEl = document.getElementById('sceneCheckList');
+    listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);"><div class="ot-spinner" style="width:12px;height:12px;margin:0 auto 0.4rem;border:2px solid rgba(0,212,255,0.2);border-top-color:#00d4ff;border-radius:50%;animation:spin 0.6s linear infinite;"></div>加载中...</div>';
+    fetch('/api/v1/scenes')
+        .then(r => r.json())
+        .then(scenes => {
+            if (!scenes.length) {
+                listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);">暂无可用场景，将直接创建对话</div>';
+                return;
+            }
+            listEl.innerHTML = scenes.map(sc => {
+                const isSystem = sc.scene_is_system === '1';
+                return `<label class="scene-check-item" data-sid="${sc.id}">
+                    <input type="checkbox" value="${sc.id}" />
+                    <div class="sc-info">
+                        <div class="sc-name">${escHtml(sc.name)} ${isSystem ? '<span class="sc-badge">预设</span>' : ''}</div>
+                        <div class="sc-desc">${escHtml(sc.scene_desc || '')}</div>
+                    </div>
+                </label>`;
+            }).join('');
+            // 点击整行切换选中
+            listEl.querySelectorAll('.scene-check-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    if (e.target.tagName === 'INPUT') return;
+                    const cb = this.querySelector('input');
+                    cb.checked = !cb.checked;
+                    this.classList.toggle('selected', cb.checked);
+                });
+                item.querySelector('input').addEventListener('change', function() {
+                    item.classList.toggle('selected', this.checked);
+                });
+            });
+        })
+        .catch(() => {
+            listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:#ef4444;">加载失败，将直接创建对话</div>';
+        });
+}
+
+function closeSceneModal() {
+    document.getElementById('sceneSelectModal').style.display = 'none';
+}
+
+function getSelectedSceneIds() {
+    const checks = document.querySelectorAll('#sceneCheckList input[type=\"checkbox\"]:checked');
+    return Array.from(checks).map(c => c.value);
+}
+
+async function confirmNewConversation() {
+    const sceneIds = getSelectedSceneIds();
+    const uuid = generateUUID();
+    const conv = {
+        id: uuid,
+        title: '新对话',
+        sceneIds: sceneIds,
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+    saveConversation(conv);
+
+    // 绑定场景到后端
+    if (sceneIds.length > 0) {
+        try {
+            await fetch('/api/v1/chat-scenes/bind', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chart_id: uuid, scene_ids: sceneIds }),
+            });
+        } catch (_) {}
+    }
+
+    closeSceneModal();
+    switchConversation(uuid);
+}
+
+async function switchConversation(uuid) {
+    const conv = loadConversation(uuid);
+    if (!conv) {
+        // 数据不存在，从索引中清除
+        const index = loadIndex().filter(id => id !== uuid);
+        saveIndex(index);
+        renderSidebar();
+        return;
+    }
+
+    // 保存当前对话（如果有未保存的运行时消息）
+    if (currentConvId && currentConvId !== uuid) {
+        persistCurrentMessages();
+    }
+
+    currentConvId = uuid;
+    currentMessages = [...(conv.messages || [])];
+
+    // 加载场景名称
+    let sceneNames = conv.sceneNames || [];
+    if (!sceneNames.length && (conv.sceneIds || []).length > 0) {
+        try {
+            const r = await fetch(`/api/v1/chat-scenes/${uuid}`);
+            if (r.ok) {
+                const data = await r.json();
+                sceneNames = data.map(d => d.name).filter(Boolean);
+                conv.sceneNames = sceneNames;
+                saveConversation(conv);
+            }
+        } catch (_) {}
+    }
+
+    // 更新头部显示
+    updateChatHeader(sceneNames);
+    document.getElementById('chatEmpty').style.display = 'none';
+    renderMessages();
+    renderSidebar();
+    inputEl.focus();
+}
+
+function updateChatHeader(sceneNames) {
+    const uuidPart = (currentConvId || '').substring(0, 8);
+    let html = `当前对话 <span class="uuid">${uuidPart}…</span>`;
+    if (sceneNames && sceneNames.length > 0) {
+        html += ` &nbsp;|&nbsp; <span style="font-size:0.7rem;color:#c4b5fd;">📋 ${sceneNames.map(s => escHtml(s)).join(', ')}</span>`;
+    }
+    document.getElementById('currentConvId').parentElement.innerHTML = html;
+}
+
+function persistCurrentMessages() {
+    if (!currentConvId) return;
+    const conv = loadConversation(currentConvId);
+    if (!conv) return;
+    conv.messages = [...currentMessages];
+    conv.title = deriveTitle(conv.messages);
+    saveConversation(conv);
+}
+
+// ═══════════════════════════════════════════════
+//  删除确认
+// ═══════════════════════════════════════════════
+
+function promptDelete(uuid, title) {
+    deleteTargetUuid = uuid;
+    document.getElementById('deleteModalMsg').textContent =
+        `确定要删除「${title}」吗？此操作不可恢复。`;
+    document.getElementById('deleteModal').style.display = 'flex';
+}
+
+function closeDeleteModal() {
+    deleteTargetUuid = null;
+    document.getElementById('deleteModal').style.display = 'none';
+}
+
+function confirmDelete() {
+    if (!deleteTargetUuid) return;
+    const wasCurrent = deleteTargetUuid === currentConvId;
+    deleteConversation(deleteTargetUuid);
+
+    if (wasCurrent) {
+        currentConvId = null;
+        currentMessages = [];
+        document.getElementById('currentConvId').textContent = '—';
+        document.getElementById('chatEmpty').style.display = 'flex';
+        messagesEl.innerHTML = `
+            <div class="chat-empty" id="chatEmpty">
+                <div class="empty-icon">💬</div>
+                <div class="empty-text">选择或创建一个对话开始聊天</div>
+                <div class="empty-hint">点击左侧「＋ 新建对话」或选择历史对话</div>
+            </div>`;
+    }
+
+    renderSidebar();
+    closeDeleteModal();
+}
+
+// ═══════════════════════════════════════════════
+//  消息渲染
+// ═══════════════════════════════════════════════
+
+function renderMessages() {
+    const emptyEl = document.getElementById('chatEmpty');
+    if (currentMessages.length === 0) {
+        emptyEl.style.display = 'flex';
+        // 清除动态添加的消息 DOM，保留 empty 占位
+        messagesEl.querySelectorAll('.msg').forEach(el => el.remove());
+        return;
+    }
+    emptyEl.style.display = 'none';
+
+    // 重建消息 DOM
+    messagesEl.querySelectorAll('.msg').forEach(el => el.remove());
+    for (const msg of currentMessages) {
+        const div = document.createElement('div');
+        div.className = `msg ${msg.role}`;
+        const roleName = msg.role === 'user' ? '你' : 'AI';
+        div.innerHTML = `<div class="role">${roleName}</div><div class="content">${formatMarkdown(msg.content)}</div>`;
+        messagesEl.appendChild(div);
+    }
+    scrollToBottom();
+}
+
+function renderMsg(role, content) {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    const roleName = role === 'user' ? '你' : 'AI';
+    const stepsBar = role === 'assistant'
+        ? `<div class="pipeline-steps">${PIPELINE_STEPS.map((s,i) =>
+            `<span class="pipeline-step" id="step-${i}">${i+1}.${s}</span>`).join('')}</div>`
+        : '';
+    div.innerHTML = `<div class="role">${roleName}</div>${stepsBar}<div class="content"></div>`;
+    messagesEl.appendChild(div);
+    document.getElementById('chatEmpty').style.display = 'none';
+    scrollToBottom();
+    return div;
+}
+
+function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function markStep(idx, state) {
+    const el = document.getElementById('step-' + idx);
+    if (el) el.className = 'pipeline-step ' + state;
+}
+
+function toolStepIndex(toolName) {
+    if (TOOL_STEP_MAP[toolName] !== undefined) return TOOL_STEP_MAP[toolName];
+    const localMap = {
+        'search_knowledge_graph': 1,
+        'search_ontology_models': 1,
+        'get_ontology_tree': 1,
+        'get_model_detail': 1,
+        'call_reasoner': 2,
+        'list_reasoner_tools': 2,
+        'traverse_graph': 3,
+    };
+    return localMap[toolName] !== undefined ? localMap[toolName] : -1;
+}
+
+// ═══════════════════════════════════════════════
+//  推理机面板
+// ═══════════════════════════════════════════════
+
+function openReasonerPanel() {
+    document.getElementById('reasonerPanel').classList.add('open');
+}
+
+function closeReasonerPanel() {
+    document.getElementById('reasonerPanel').classList.remove('open');
+}
+
+function addReasonerCall(toolName, args, result) {
+    const now = new Date().toLocaleTimeString();
+    reasonerCalls.push({ id: ++reasonerCallId, toolName, args, result, time: now });
+    renderReasonerPanel();
+    openReasonerPanel();
+}
+
+function renderReasonerPanel() {
+    const content = document.getElementById('reasonerContent');
+    if (reasonerCalls.length === 0) {
+        content.innerHTML = '<h3><span class="dot"></span> 推理机调用记录</h3><p class="reasoner-empty">当 AI 调用推理机时，调用记录将显示在此处</p>';
+        return;
+    }
+    let html = '<h3><span class="dot"></span> 推理机调用记录</h3><ul class="reasoner-list">';
+    for (const c of reasonerCalls) {
+        const argsSummary = c.args ? escHtml(JSON.stringify(c.args).substring(0, 120)) : '-';
+        const resultStr = c.result !== undefined
+            ? escHtml((typeof c.result === 'string' ? c.result : JSON.stringify(c.result, null, 2)).substring(0, 600))
+            : '<span style="color:#00d4ff">⏳ 等待结果...</span>';
+        html += `<li>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <b style="color:#00d4ff">#${c.id}</b>
+                <span class="call-time">${c.time}</span>
+            </div>
+            <div style="margin-top:0.2rem;"><b>工具:</b> ${escHtml(c.toolName)}</div>
+            <div style="font-size:0.72rem;color:#6988a0;margin-top:0.15rem;"><b>参数:</b> ${argsSummary}</div>
+            <div style="margin-top:0.3rem;background:rgba(0,0,0,0.2);padding:0.4rem 0.5rem;border-radius:4px;font-size:0.72rem;white-space:pre-wrap;word-break:break-all;max-height:150px;overflow-y:auto;">${resultStr}</div>
+        </li>`;
+    }
+    html += '</ul>';
+    content.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+//  发送消息（SSE 流式）
+// ═══════════════════════════════════════════════
+
+async function send() {
+    const text = inputEl.value.trim();
+    if (!text || abortController) return;
+
+    // 如果没有当前对话，自动创建
+    if (!currentConvId) {
+        newConversation();
+        // newConversation 调用 switchConversation 是同步的
+    }
+
+    inputEl.value = '';
+    inputEl.disabled = true;
+    sendBtn.disabled = true;
+    stopBtn.style.display = 'inline-block';
+    indicator.style.display = 'inline';
+    currentStepIdx = -1;
+    reasonerCalls = [];
+    reasonerCallId = 0;
+
+    renderMsg('user', text);
+    currentMessages.push({ role: 'user', content: text });
+    persistCurrentMessages();
+
+    const assistantDiv = renderMsg('assistant', '');
+    const contentEl = assistantDiv.querySelector('.content');
+
+    abortController = new AbortController();
+    try {
+        const resp = await fetch('/api/v1/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: [...currentMessages], model: modelSelect.value, scene_ids: currentConvId ? (loadConversation(currentConvId)?.sceneIds || []) : [] }),
+            signal: abortController.signal,
+        });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let full = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            for (const line of buffer.split('\n')) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+
+                try {
+                    const event = JSON.parse(data);
+                    const type = event.type;
+
+                    if (type === 'content') {
+                        full += event.content || '';
+                        contentEl.innerHTML = formatMarkdown(full);
+                        scrollToBottom();
+
+                        if (full.includes('目标理解') && currentStepIdx < 0) { currentStepIdx = 0; markStep(0, 'done'); }
+                        if ((full.includes('知识依据') || full.includes('图谱')) && currentStepIdx < 1) {
+                            markStep(0, 'done'); markStep(1, 'active'); currentStepIdx = 1;
+                        }
+                        if (full.includes('执行步骤') && currentStepIdx < 4) {
+                            for (let i = 0; i <= 4; i++) markStep(i, 'done');
+                            markStep(5, 'active'); currentStepIdx = 5;
+                        }
+                        if ((full.includes('风险') || full.includes('假设')) && currentStepIdx < 6) {
+                            for (let i = 0; i <= 6; i++) markStep(i, 'done');
+                            currentStepIdx = 6;
+                        }
+
+                    } else if (type === 'tool_call') {
+                        const toolName = event.tool || 'unknown';
+                        const stepIdx = toolStepIndex(toolName);
+                        if (stepIdx >= 0) {
+                            for (let i = 0; i < stepIdx; i++) markStep(i, 'done');
+                            markStep(stepIdx, 'active');
+                            currentStepIdx = stepIdx;
+                        }
+                        if (toolName === 'call_reasoner') {
+                            addReasonerCall(toolName, event.args || {}, undefined);
+                        }
+                        const card = document.createElement('div');
+                        card.className = 'tool-call';
+                        card.id = 'tc-' + toolName + '-' + Date.now();
+                        const argsStr = JSON.stringify(event.args || {}).substring(0, 80);
+                        card.innerHTML = `<div class="tool-call-header" onclick="this.parentElement.classList.toggle('open')">
+                            <span class="tool-icon">🔧</span>
+                            <span class="tool-name">${escHtml(toolName)}</span>
+                            <span class="tool-args">${escHtml(argsStr)}</span>
+                            <span style="font-size:0.65rem;opacity:0.5;">▶</span>
+                        </div>
+                        <div class="tool-call-body"><div class="ot-spinner" style="width:12px;height:12px;margin:0.3rem;"></div></div>`;
+                        contentEl.appendChild(card);
+
+                    } else if (type === 'tool_result') {
+                        const toolName = event.tool || 'unknown';
+                        const cards = contentEl.querySelectorAll('.tool-call');
+                        for (let i = cards.length - 1; i >= 0; i--) {
+                            if (cards[i].querySelector('.tool-name').textContent === toolName &&
+                                cards[i].querySelector('.tool-call-body').textContent.includes('')) {
+                                const body = cards[i].querySelector('.tool-call-body');
+                                const result = event.result || '';
+                                body.textContent = result.length > 800 ? result.substring(0, 800) + '...(截断)' : result;
+                                break;
+                            }
+                        }
+                        if (toolName === 'call_reasoner') {
+                            const last = reasonerCalls[reasonerCalls.length - 1];
+                            if (last && last.result === undefined) {
+                                last.result = event.result || '(无结果)';
+                                renderReasonerPanel();
+                            }
+                        }
+                        if (toolStepIndex(toolName) >= 0) markStep(toolStepIndex(toolName), 'done');
+
+                    } else if (type === 'error') {
+                        contentEl.innerHTML += `<div style="color:#ef4444;padding:0.5rem;">❌ ${escHtml(event.error)}</div>`;
+                    }
+                } catch(e) { /* skip malformed JSON */ }
+            }
+            buffer = '';
+        }
+
+        for (let i = 0; i < PIPELINE_STEPS.length; i++) markStep(i, 'done');
+
+        // 保存助手回复
+        currentMessages.push({ role: 'assistant', content: full });
+        persistCurrentMessages();
+        renderSidebar();  // 更新标题和时间
+
+    } catch (e) {
+        if (e.name !== 'AbortError') {
+            contentEl.innerHTML += `<div style="color:#ef4444;padding:0.5rem;">❌ ${escHtml(e.message)}</div>`;
+        }
+    } finally {
+        abortController = null;
+        inputEl.disabled = false;
+        sendBtn.disabled = false;
+        stopBtn.style.display = 'none';
+        indicator.style.display = 'none';
+        inputEl.focus();
+    }
+}
+
+function stop() {
+    if (abortController) { abortController.abort(); abortController = null; }
+}
+
+// ═══════════════════════════════════════════════
+//  工具函数
+// ═══════════════════════════════════════════════
+
+function formatMarkdown(text) {
+    return text
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/^- (.+)$/gm, '• $1')
+        .replace(/^(\d+)\. (.+)$/gm, '$1. $2')
+        .replace(/\n/g, '<br>');
+}
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ═══════════════════════════════════════════════
+//  初始化
+// ═══════════════════════════════════════════════
+
+async function loadPipelineSteps() {
+    try {
+        const resp = await fetch('/api/v1/pipeline-steps');
+        if (resp.ok) {
+            const data = await resp.json();
+            PIPELINE_STEPS = data.steps.map(s => s.label);
+            TOOL_STEP_MAP = data.tool_step_map || {};
+            stepsLoaded = true;
+        }
+    } catch (_) {}
+}
+
+function init() {
+    loadPipelineSteps();
+    renderSidebar();
+
+    // 如果有历史对话，自动打开最近一个
+    const index = loadIndex();
+    if (index.length > 0) {
+        switchConversation(index[0]);
+    }
+
+    inputEl.focus();
+}
+
+init();
+</script>
+{% endblock %}

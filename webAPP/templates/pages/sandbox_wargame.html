@@ -1,0 +1,1341 @@
+{% extends "base.html" %}
+{% block title %}沙盘推演 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<!-- React + ReactDOM + ReactFlow 从 unpkg CDN 加载 -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<!-- ReactFlow CSS + JS -->
+<link rel="stylesheet" href="https://unpkg.com/reactflow@11/dist/style.css">
+<script src="https://unpkg.com/reactflow@11/dist/umd/index.js"></script>
+<style>
+/* 覆盖 base.html 的 container 限制 — 沙盘页面全宽全高 */
+body { overflow: hidden; }
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+#root { width: 100%; height: calc(100vh - 60px); }
+
+/* 节点按标签着色 — 军演/推演暖色系 */
+.node-Entity { background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Individual { background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Class { background: rgba(59, 130, 246, 0.12); border: 2px solid rgba(59, 130, 246, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Property { background: rgba(16, 185, 129, 0.12); border: 2px solid rgba(16, 185, 129, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Patrol { background: rgba(239, 68, 68, 0.12); border: 2px solid rgba(239, 68, 68, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-Type { background: rgba(139, 92, 246, 0.12); border: 2px solid rgba(139, 92, 246, 0.45); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+.node-default { background: rgba(20, 28, 16, 0.8); border: 2px solid rgba(245, 158, 11, 0.18); border-radius: 6px; padding: 8px 14px; color: #f5f0e0; font-size:12px; text-align: center; }
+
+/* 工具栏 — 浮动在左上 (军演暖色系) */
+.toolbar { position: fixed; top: 60px; left: 0; right: 0; z-index: 10; display: flex; gap: 0.4rem; padding: 0.4rem 1rem; background: rgba(12, 18, 10, 0.94); border-bottom: 1px solid rgba(245, 158, 11, 0.25); align-items: center; flex-wrap: wrap; backdrop-filter: blur(8px); }
+.toolbar button { padding: 0.3rem 0.7rem; font-size: 0.8rem; white-space: nowrap; }
+.toolbar button.wargame-btn { border-color: #f59e0b; color: #f59e0b; font-weight: 600; }
+.toolbar button.wargame-btn:hover { background: rgba(245, 158, 11, 0.15); }
+.toolbar button.wargame-btn:disabled { border-color: rgba(245,158,11,0.15); color: rgba(245,158,11,0.25); cursor: not-allowed; background: transparent; }
+
+/* 场景选择器弹窗 */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.modal-box { background: rgba(17, 24, 72, 0.98); border: 1px solid rgba(0, 212, 255, 0.3); border-radius: 10px; padding: 1.5rem; max-width: 360px; width: 90%; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+.modal-box h4 { color: #fff; margin-bottom: 0.75rem; }
+.modal-box .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.btn-ghost { background: transparent !important; border-color: var(--border) !important; color: var(--text-dim) !important; font-size: 0.8rem; padding: 0.45rem 1rem; }
+.scene-check-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.5rem; border-radius: 6px; cursor: pointer; transition: all 0.15s; border: 1px solid transparent; margin-bottom: 0.15rem; }
+.scene-check-row:hover { background: rgba(0,212,255,0.04); border-color: rgba(0,212,255,0.08); }
+.scene-check-row.checked { background: rgba(0,212,255,0.06); border-color: rgba(0,212,255,0.2); }
+.scene-check-row input[type="checkbox"] { accent-color: #7c3aed; width: 15px; height: 15px; cursor: pointer; margin: 0; }
+.toolbar input { width: 160px; padding: 0.3rem 0.5rem; font-size: 0.8rem; }
+.toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 0.2rem; }
+.toolbar .hint { font-size: 0.75rem; color: #9ca18c; white-space: nowrap; }
+
+/* 内容区在工具栏下方 */
+#root { margin-top: 38px; height: calc(100vh - 98px); }
+
+/* ReactFlow 控件 — 军演深色主题 */
+.react-flow__controls { background: rgba(12,18,10,0.9) !important; border: 1px solid rgba(245,158,11,0.25); border-radius: 6px; overflow: hidden; }
+.react-flow__controls-button { background: transparent !important; border-color: rgba(245,158,11,0.25) !important; fill: #9ca18c !important; }
+.react-flow__controls-button:hover { background: rgba(245,158,11,0.1) !important; }
+.react-flow__minimap { background: rgba(12,18,10,0.8) !important; border: 1px solid rgba(245,158,11,0.25) !important; }
+
+/* spinner */
+.ot-spinner { width: 18px; height: 18px; border: 2px solid rgba(245,158,11,0.15); border-top-color: #f59e0b; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 滑块开关 */
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; vertical-align: middle; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.25); border-radius: 20px; transition: 0.25s; }
+.toggle-slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background: #9ca18c; border-radius: 50%; transition: 0.25s; }
+.toggle-switch input:checked + .toggle-slider { background: rgba(245,158,11,0.35); border-color: #f59e0b; }
+.toggle-switch input:checked + .toggle-slider::before { background: #f59e0b; transform: translateX(16px); }
+
+/* 侧边栏 — 军演暖色系 */
+.sidebar { position: fixed; right: 0; top: 60px; width: 340px; height: calc(100vh - 60px); background: rgba(12, 18, 10, 0.97); border-left: 1px solid rgba(245, 158, 11, 0.25); overflow-y: auto; z-index: 100; padding: 1.2rem; backdrop-filter: blur(12px); display: none; }
+.sidebar.open { display: block; }
+.sidebar h3 { color: #f59e0b; margin-bottom: 1rem; font-size: 1rem; }
+.sidebar label { display: block; font-size: 0.75rem; color: #9ca18c; margin-bottom: 0.15rem; margin-top: 0.4rem; }
+.sidebar input, .sidebar textarea, .sidebar select { width: 100%; margin-bottom: 0.3rem; font-size: 0.8rem; }
+.sidebar .props-table { width: 100%; font-size: 0.78rem; }
+.sidebar .props-table td { padding: 0.25rem 0.3rem; border-bottom: 1px solid rgba(245, 158, 11, 0.15); color: #d4d0c0; }
+.sidebar .btn-row { display: flex; gap: 0.4rem; margin-top: 0.8rem; }
+.sidebar .close-btn { position: absolute; top: 0.6rem; right: 0.8rem; background: none; border: none; color: #9ca18c; font-size: 1.2rem; cursor: pointer; }
+
+/* 推理结果面板 — 右侧弹出 */
+.infer-panel { position: fixed; right: -440px; top: 60px; width: 440px; height: calc(100vh - 60px); background: rgba(12, 18, 10, 0.98); border-left: 1px solid rgba(245, 158, 11, 0.35); z-index: 101; padding: 1.5rem; overflow-y: auto; transition: right 0.35s ease; backdrop-filter: blur(12px); }
+.infer-panel.open { right: 0; }
+.infer-panel h3 { color: #f59e0b; margin-bottom: 1rem; font-size: 1.05rem; display: flex; align-items: center; gap: 0.4rem; }
+.infer-panel h3 .dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.5); }
+.infer-panel .close-btn { position: absolute; top: 0.6rem; right: 0.8rem; background: none; border: none; color: #9ca18c; font-size: 1.2rem; cursor: pointer; }
+.infer-panel .close-btn:hover { color: #f59e0b; }
+.infer-panel .infer-params { background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.15); border-radius: 6px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; font-size: 0.78rem; color: #d4d0c0; }
+.infer-panel .infer-params span { color: #f59e0b; font-weight: 600; }
+.infer-panel .infer-result { background: rgba(0,0,0,0.2); border: 1px solid rgba(245,158,11,0.12); border-radius: 6px; padding: 1rem; white-space: pre-wrap; word-break: break-all; font-size: 0.82rem; line-height: 1.7; color: #d4d0c0; max-height: calc(100vh - 280px); overflow-y: auto; }
+.infer-panel .infer-loading { display: flex; align-items: center; gap: 0.6rem; color: #f59e0b; padding: 2rem 0; justify-content: center; }
+.infer-panel .infer-error { color: #ef4444; font-size: 0.8rem; padding: 0.6rem; background: rgba(239,68,68,0.06); border-radius: 6px; margin: 0.6rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 工具栏 -->
+<div class="toolbar">
+    <button onclick="addNode()">＋ 实体</button>
+    <button onclick="addEdgeSidebar()">＋ 关系</button>
+    <button onclick="deleteSelected()">🗑 删除</button>
+    <span class="sep"></span>
+    <button onclick="fitView()">⊞ 适应</button>
+    <button id="wargameBtn" onclick="wargameStart()" class="wargame-btn">▶ 推演</button>
+    <span class="sep"></span>
+    <span style="color:#9ca18c;font-size:0.75rem;">上下文</span>
+    <button id="ctxSceneBtn" onclick="switchCtxMode('scene')" style="background:rgba(124,58,237,0.2);border-color:#7c3aed;color:#c4b5fd;font-size:0.75rem;white-space:nowrap;border-radius:4px 0 0 4px;margin-right:0;" title="选择场景作为推演上下文">
+        📋 场景 <span id="ctxSceneCount" style="opacity:0.6;">0</span>
+    </button>
+    <button id="ctxChatBtn" onclick="switchCtxMode('chat')" style="background:rgba(124,58,237,0.08);border-color:rgba(124,58,237,0.2);color:rgba(196,181,253,0.5);font-size:0.75rem;white-space:nowrap;border-radius:0 4px 4px 0;margin:0;" title="选择AI对话历史作为推演上下文">
+        💬 对话 <span id="ctxChatLabel" style="opacity:0.5;">—</span>
+    </button>
+    <span class="sep"></span>
+    <input id="searchInput" type="text" placeholder="搜索实体..." onkeydown="if(event.key==='Enter')searchNodes()" />
+    <button onclick="searchNodes()">搜索</button>
+    <button onclick="clearSearch()" title="返回全部实体">清除</button>
+    <button onclick="loadAndRender()">刷新</button>
+    <span class="sep"></span>
+    <span id="nodeCount" class="hint">实体: - | 关系: -</span>
+    <span class="sep"></span>
+    <span style="color:#9ca18c;font-size:0.75rem;">置信度</span>
+    <input id="confidenceVal" type="number" value="0.00" min="0.00" max="1.00" step="0.01"
+           style="width:70px;padding:0.2rem 0.4rem;text-align:center;"
+           title="全局置信度阈值 (0.01-1.00)，影响推理命中概率"
+           onchange="this.value=parseFloat(this.value||0.00).toFixed(2)" />
+    <label style="color:#9ca18c;font-size:0.75rem;display:flex;align-items:center;gap:0.3rem;">
+        <span class="toggle-switch">
+            <input id="confidenceEnable" type="checkbox" checked title="启用/停用置信度参数传递" />
+            <span class="toggle-slider"></span>
+        </span>
+        <span style="font-size:0.65rem;">启用</span>
+    </label>
+</div>
+
+<div id="root">
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca18c;font-size:1rem;">
+        正在加载推演沙盘...
+    </div>
+</div>
+
+<!-- 侧边栏 -->
+<div id="sidebar" class="sidebar">
+    <button class="close-btn" onclick="closeSidebar()">✕</button>
+    <div id="sidebarContent"></div>
+</div>
+
+<!-- 上下文选择弹窗（场景 / 对话历史） -->
+<div id="ctxModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box" style="max-width:500px;">
+        <h4 id="ctxModalTitle">📋 选择上下文</h4>
+        <p style="color:var(--text-dim);font-size:0.8rem;" id="ctxModalHint"></p>
+        <div style="max-height:320px;overflow-y:auto;margin:0.75rem 0;" id="ctxModalList">
+            <div style="text-align:center;padding:1rem;color:var(--text-dim);">加载中...</div>
+        </div>
+        <div class="modal-actions">
+            <span id="ctxModalHint2" style="flex:1;font-size:0.7rem;color:var(--text-dim);"></span>
+            <button class="btn-ghost" onclick="closeCtxModal()">关闭</button>
+            <button id="ctxModalClearBtn" class="btn-ghost" onclick="clearCtxSelection()" style="color:#ef4444;display:none;">清除选择</button>
+        </div>
+    </div>
+</div>
+
+<!-- 推理结果面板 -->
+<div id="inferPanel" class="infer-panel">
+    <button class="close-btn" onclick="closeInferPanel()">✕</button>
+    <div id="inferContent">
+        <h3><span class="dot"></span> 推演推理结果</h3>
+        <p style="color:#9ca18c;font-size:0.82rem;">点击画布中的实体节点，再点击 <b style="color:#f59e0b;">▶ 推演</b> 开始推理</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ====================================================================
+// API (共用本体建模后端)
+// ====================================================================
+const API = '/api/v1/ontology';
+
+async function api(path, opts) {
+    const url = API + path;
+    const method = opts?.method || 'GET';
+    const body = opts?.body;
+    console.groupCollapsed(`%c📡 API ${method} %c${path}`,
+        'color:#f59e0b;font-weight:bold', 'color:#9ca18c');
+    console.log('URL:', url);
+    if (body) { try { console.log('Body:', JSON.parse(body)); } catch (_) { console.log('Body:', body); } }
+    const start = performance.now();
+    const r = await fetch(url, opts);
+    const elapsed = (performance.now() - start).toFixed(1);
+    if (!r.ok) {
+        const t = await r.text();
+        console.error(`%c❌ ${r.status} %c(${elapsed}ms)`,
+            'color:#ef4444;font-weight:bold', 'color:#9ca18c');
+        console.error('Response:', t);
+        console.groupEnd();
+        throw new Error(t);
+    }
+    const json = await r.json();
+    console.log(`%c✅ ${r.status} %c(${elapsed}ms)`,
+        'color:#10b981;font-weight:bold', 'color:#9ca18c');
+    console.log('Response:', json);
+    console.groupEnd();
+    return json;
+}
+
+async function loadData() {
+    const [nodes, schema] = await Promise.all([
+        api('/nodes?limit=500'),
+        api('/schema').catch(() => ({ labels:[], relationship_types:[], node_count:0, edge_count:0 })),
+    ]);
+    document.getElementById('nodeCount').textContent =
+        `实体: ${schema.node_count || nodes.length} | 关系: ${schema.edge_count || 0}`;
+    return { nodes, schema };
+}
+
+// ====================================================================
+// 全局状态
+// ====================================================================
+let selectedNode = null;
+let selectedEdge = null;
+let sidebarMode = 'view'; // view | add | edge
+let schemaData = { labels: [], relationship_types: [] };
+
+// 推演军演配色 — 琥珀/蓝/绿/红/紫
+const LABEL_COLORS = {
+    Entity:     '#f59e0b',  // 琥珀 — 部队/编队
+    Individual: '#f59e0b',
+    Class:      '#3b82f6',  // 蓝 — 装备/平台
+    Property:   '#10b981',  // 绿 — 属性/参数
+    Patrol:     '#ef4444',  // 红 — 巡逻/侦察
+    Type:       '#8b5cf6',  // 紫 — 类型/分类
+};
+
+// 标签中文映射 (前端显示用)
+const LABEL_NAMES = {
+    Entity:     '部队/编队',
+    Individual: '单兵/单元',
+    Class:      '装备/平台',
+    Property:   '属性/参数',
+    Patrol:     '巡逻/侦察',
+    Type:       '类型/分类',
+};
+
+function toFlowNode(n) {
+    const label = n.labels?.[0] || 'default';
+    const name = n.properties?.name || n.properties?.title || '#' + n.id;
+    const x = n.properties?._x != null ? n.properties._x : Math.random() * 500 + 50;
+    const y = n.properties?._y != null ? n.properties._y : Math.random() * 400 + 50;
+    return {
+        id: String(n.id),
+        type: 'default',
+        position: { x, y },
+        data: { label: name, labelType: label, props: n.properties },
+        className: LABEL_COLORS[label] ? 'node-' + label : 'node-default',
+        style: { borderColor: LABEL_COLORS[label] || '#9ca18c' },
+    };
+}
+
+function toFlowEdges(nodes) {
+    const edges = [], seen = new Set();
+    for (const n of nodes) {
+        if (!n.relationships) continue;
+        for (const r of n.relationships) {
+            const key = n.id + '-' + r.target_id + '-' + r.type;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            edges.push({
+                id: String(r.edge_id || key),
+                source: String(n.id),
+                target: String(r.target_id),
+                type: 'smoothstep',
+                label: r.type,
+                markerEnd: { type: 'arrowclosed', color: '#9ca18c' },
+                style: { stroke: '#9ca18c' },
+                data: { type: r.type, props: r.props },
+            });
+        }
+    }
+    return edges;
+}
+
+// ====================================================================
+// ReactFlow 实例
+// ====================================================================
+let rfInstance = null;
+let _setNodes = null;  // 暴露给全局 searchNodes 使用
+let _setEdges = null;
+let _getNodes = null;  // 暴露给全局 expandOntologyTree 使用
+let _getEdges = null;
+let _lastNeighborId = null;  // 记录最后一次邻域查询的节点 ID
+let _pinnedNode = null;      // 持久保存用户点击的节点，用于推演
+
+const rfContainer = document.getElementById('root');
+const { ReactFlow, ReactFlowProvider, Controls, MiniMap, Background, applyNodeChanges, applyEdgeChanges } = window.ReactFlow || {};
+if (!ReactFlow) {
+    rfContainer.innerHTML = '<div style="color:#f59e0b;padding:2rem;text-align:center;">ReactFlow CDN 加载失败，请检查网络连接</div>';
+}
+
+function makeNodeComponent(label, color) {
+    return function NodeComp({ data }) {
+        return React.createElement('div', { style: { borderColor: color } },
+            React.createElement('div', { style: { fontWeight: 600, fontSize: 13 } }, data.label),
+            data.props?.code &&
+                React.createElement('div', { style: { fontSize: 10, color: '#9ca18c', marginTop: 2 } }, data.props.code)
+        );
+    };
+}
+
+const nodeTypes = {};
+for (const [label, color] of Object.entries(LABEL_COLORS)) {
+    nodeTypes[label] = makeNodeComponent(label, color);
+}
+
+function renderApp() {
+    if (!ReactFlow) return;
+
+    const App = () => {
+        const [nodes, setNodes] = React.useState([]);
+        const [edges, setEdges] = React.useState([]);
+        const reactFlowInstance = React.useRef(null);
+        const nodesRef = React.useRef(nodes);
+        const edgesRef = React.useRef(edges);
+        nodesRef.current = nodes;
+        edgesRef.current = edges;
+
+        React.useEffect(() => {
+            // 暴露 setter/getter 给全局函数
+            _setNodes = setNodes;
+            _setEdges = setEdges;
+            _getNodes = () => nodesRef.current;
+            _getEdges = () => edgesRef.current;
+            loadData().then(({ nodes: nodeData, schema }) => {
+                schemaData = schema;
+                const ns = nodeData.map(toFlowNode);
+                const es = toFlowEdges(nodeData);
+                setNodes(ns);
+                setEdges(es);
+                setTimeout(() => reactFlowInstance.current?.fitView({ padding: 0.2 }), 300);
+            }).catch(e => {
+                rfContainer.innerHTML = `<div style="color:#f59e0b;padding:2rem;text-align:center;">
+                    <p>❌ 推演数据加载失败</p><p style="font-size:0.8rem;color:#9ca18c;">${e.message}</p>
+                    <button onclick="location.reload()" style="margin-top:1rem;">重试</button></div>`;
+            });
+        }, []);
+
+        const onInit = React.useCallback((inst) => {
+            reactFlowInstance.current = inst;
+            rfInstance = inst;
+        }, []);
+
+        const onNodeClick = React.useCallback((_, node) => {
+            console.group('%c🖱️ 点击节点 %c' + (node.data?.label || '#' + node.id),
+                'color:#f59e0b;font-weight:bold', 'color:#d4d0c0');
+            console.log('节点 ID:', node.id);
+            console.log('标签类型:', node.data?.labelType);
+            console.log('属性:', node.data?.props);
+            console.log('位置:', node.position);
+            console.groupEnd();
+
+            selectedNode = node;
+            _pinnedNode = node;
+            selectedEdge = null;
+            sidebarMode = 'view';
+            openSidebar();
+            // 立即启用推演按钮
+            const btn = document.getElementById('wargameBtn');
+            if (btn) btn.disabled = false;
+            // 点击时展开本体树，从左往右排开
+            _doExpand(node);
+        }, []);
+
+        const onEdgeClick = React.useCallback((_, edge) => {
+            selectedEdge = edge;
+            selectedNode = null;
+            sidebarMode = 'insert-node';
+            openSidebar();
+        }, []);
+
+        const onPaneClick = React.useCallback(() => closeSidebar(), []);
+
+        const onConnect = React.useCallback((params) => {
+            // 自动创建关系连线 — 默认类型「协同」
+            api('/edges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_id: Number(params.source),
+                    target_id: Number(params.target),
+                    rel_type: '协同',
+                    properties: {},
+                }),
+            }).then(() => {
+                // 保持当前视图: 如果在邻域中则重载邻域，否则全量刷新
+                if (_lastNeighborId) {
+                    loadNeighborhood(_lastNeighborId);
+                } else {
+                    loadAndRender();
+                }
+            }).catch(e => alert('建立关系失败: ' + e.message));
+        }, []);
+
+        return React.createElement(ReactFlow, {
+            nodes, edges,
+            onNodesChange: (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
+            onEdgesChange: (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+            onConnect,
+            onInit,
+            onNodeClick,
+            onEdgeClick,
+            onPaneClick,
+            nodeTypes,
+            fitView: true,
+            style: { background: 'transparent' },
+            defaultEdgeOptions: {
+                type: 'smoothstep',
+                markerEnd: { type: 'arrowclosed', color: '#9ca18c' },
+                style: { stroke: '#9ca18c' },
+            },
+        },
+            React.createElement(Background, { color: 'rgba(245,158,11,0.03)', gap: 20 }),
+            React.createElement(Controls),
+            React.createElement(MiniMap, {
+                nodeColor: (n) => LABEL_COLORS[n.data?.labelType] || '#9ca18c',
+                maskColor: 'rgba(12,18,10,0.6)',
+            })
+        );
+    };
+
+    const root = ReactDOM.createRoot(rfContainer);
+    root.render(React.createElement(App));
+}
+
+// 等 ReactFlow CDN 加载完再渲染（轮询，最多等 10 秒）
+function waitForReactFlow(retries) {
+    retries = retries || 50;
+    if (window.ReactFlow && window.ReactDOM) {
+        renderApp();
+    } else if (retries > 0) {
+        setTimeout(function() { waitForReactFlow(retries - 1); }, 200);
+    } else {
+        rfContainer.innerHTML = '<div style="color:#f59e0b;padding:2rem;text-align:center;">ReactFlow CDN 加载超时，请检查网络连接后刷新</div>';
+    }
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { waitForReactFlow(); });
+} else {
+    waitForReactFlow();
+}
+
+// Delete 键全局监听 → 走后端删除
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Delete' && (selectedNode || selectedEdge)) {
+        e.preventDefault();
+        deleteSelected();
+    }
+});
+
+// ====================================================================
+// 全局函数 (工具栏 + 侧边栏)
+// ====================================================================
+function fitView() { rfInstance?.fitView({ padding: 0.2 }); }
+
+const INFER_URL = '/api/v1/tools/call';
+
+// ── 上下文选择器（场景 / 对话历史，互斥）──
+let ctxMode = 'scene';           // 'scene' | 'chat'
+let selectedSceneIds = [];       // 多选场景
+let selectedChatId = null;       // 单选对话UUID
+let selectedChatTitle = '';      // 对话标题
+
+function switchCtxMode(mode) {
+    ctxMode = mode;
+    updateCtxButtons();
+    if (mode === 'scene') {
+        selectedChatId = null; selectedChatTitle = '';
+    } else {
+        selectedSceneIds = [];
+        document.getElementById('ctxSceneCount').textContent = '0';
+    }
+    openCtxModal();
+}
+
+function updateCtxButtons() {
+    const sceneBtn = document.getElementById('ctxSceneBtn');
+    const chatBtn = document.getElementById('ctxChatBtn');
+    if (ctxMode === 'scene') {
+        sceneBtn.style.background = 'rgba(124,58,237,0.2)';
+        sceneBtn.style.borderColor = '#7c3aed';
+        sceneBtn.style.color = '#c4b5fd';
+        chatBtn.style.background = 'rgba(124,58,237,0.08)';
+        chatBtn.style.borderColor = 'rgba(124,58,237,0.2)';
+        chatBtn.style.color = 'rgba(196,181,253,0.5)';
+    } else {
+        chatBtn.style.background = 'rgba(124,58,237,0.2)';
+        chatBtn.style.borderColor = '#7c3aed';
+        chatBtn.style.color = '#c4b5fd';
+        sceneBtn.style.background = 'rgba(124,58,237,0.08)';
+        sceneBtn.style.borderColor = 'rgba(124,58,237,0.2)';
+        sceneBtn.style.color = 'rgba(196,181,253,0.5)';
+    }
+}
+
+function clearCtxSelection() {
+    if (ctxMode === 'scene') {
+        selectedSceneIds = [];
+        document.getElementById('ctxSceneCount').textContent = '0';
+        renderSceneList();
+    } else {
+        selectedChatId = null;
+        selectedChatTitle = '';
+        document.getElementById('ctxChatLabel').textContent = '—';
+        renderChatList();
+    }
+}
+
+function openCtxModal() {
+    document.getElementById('ctxModal').style.display = 'flex';
+    if (ctxMode === 'scene') {
+        document.getElementById('ctxModalTitle').textContent = '📋 选择推演场景';
+        document.getElementById('ctxModalHint').textContent = '多选场景作为推演上下文';
+        document.getElementById('ctxModalHint2').textContent = `已选 ${selectedSceneIds.length} 个场景`;
+        document.getElementById('ctxModalClearBtn').style.display = selectedSceneIds.length > 0 ? 'inline-block' : 'none';
+        renderSceneList();
+    } else {
+        document.getElementById('ctxModalTitle').textContent = '💬 选择对话历史';
+        document.getElementById('ctxModalHint').textContent = '单选一个AI对话，将携带其完整历史消息推演';
+        document.getElementById('ctxModalHint2').textContent = selectedChatId ? '已选择' : '未选择';
+        document.getElementById('ctxModalClearBtn').style.display = selectedChatId ? 'inline-block' : 'none';
+        renderChatList();
+    }
+}
+
+function closeCtxModal() {
+    document.getElementById('ctxModal').style.display = 'none';
+}
+
+// ── 场景列表渲染 ──
+function renderSceneList() {
+    const listEl = document.getElementById('ctxModalList');
+    listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);">加载中...</div>';
+    fetch('/api/v1/scenes')
+        .then(r => r.json())
+        .then(scenes => {
+            if (!scenes.length) {
+                listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);">暂无可用场景</div>';
+                return;
+            }
+            listEl.innerHTML = scenes.map(sc => {
+                const checked = selectedSceneIds.includes(sc.id);
+                return `<label class="scene-check-row${checked ? ' checked' : ''}" data-sid="${sc.id}">
+                    <input type="checkbox" value="${sc.id}" ${checked ? 'checked' : ''} />
+                    <div style="flex:1;">
+                        <div style="font-size:0.85rem;color:#e8ecf4;">${sc.name}</div>
+                        <div style="font-size:0.7rem;color:var(--text-dim);">${sc.scene_desc || ''}</div>
+                    </div>
+                    ${sc.scene_is_system === '1' ? '<span style="font-size:0.6rem;padding:0.1rem 0.4rem;border-radius:3px;background:rgba(124,58,237,0.2);color:#c4b5fd;">预设</span>' : ''}
+                </label>`;
+            }).join('');
+            listEl.querySelectorAll('.scene-check-row').forEach(row => {
+                row.addEventListener('click', function(e) {
+                    if (e.target.tagName === 'INPUT') return;
+                    const cb = this.querySelector('input');
+                    cb.checked = !cb.checked;
+                    updateSceneCount();
+                });
+                row.querySelector('input').addEventListener('change', updateSceneCount);
+            });
+        })
+        .catch(() => { listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:#ef4444;">加载失败</div>'; });
+}
+
+function updateSceneCount() {
+    const checks = document.querySelectorAll('#ctxModalList input[type=\"checkbox\"]:checked');
+    selectedSceneIds = Array.from(checks).map(c => c.value);
+    document.getElementById('ctxSceneCount').textContent = selectedSceneIds.length;
+    document.getElementById('ctxModalHint2').textContent = `已选 ${selectedSceneIds.length} 个场景`;
+    document.getElementById('ctxModalClearBtn').style.display = selectedSceneIds.length > 0 ? 'inline-block' : 'none';
+    document.querySelectorAll('#ctxModalList .scene-check-row').forEach(row => {
+        const cb = row.querySelector('input');
+        row.classList.toggle('checked', cb.checked);
+    });
+}
+
+// ── 对话列表渲染（从 localStorage 读取）──
+function loadLocalConversations() {
+    try {
+        const raw = localStorage.getItem('chat_index');
+        return raw ? JSON.parse(raw) : [];
+    } catch (_) { return []; }
+}
+
+function loadLocalConv(uuid) {
+    try {
+        const raw = localStorage.getItem('chat_' + uuid);
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+}
+
+function renderChatList() {
+    const listEl = document.getElementById('ctxModalList');
+    const index = loadLocalConversations();
+    if (!index.length) {
+        listEl.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);">暂无历史对话<br><br><span style="font-size:0.75rem;">请先在 <a href="/chat" style="color:var(--accent);">AI对话</a> 页面创建对话</span></div>';
+        return;
+    }
+    listEl.innerHTML = index.map(uuid => {
+        const conv = loadLocalConv(uuid);
+        if (!conv) return '';
+        const isActive = uuid === selectedChatId;
+        const title = (conv.title || '新对话').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const msgCount = (conv.messages || []).length;
+        const time = (conv.updatedAt || conv.createdAt || '').substring(0, 16);
+        const sceneNames = (conv.sceneNames || []).slice(0, 2).join(' · ');
+        return `<div class="scene-check-row${isActive ? ' checked' : ''}" data-cid="${uuid}" style="cursor:pointer;">
+            <input type="radio" name="chatSelect" value="${uuid}" ${isActive ? 'checked' : ''} style="accent-color:#7c3aed;" />
+            <div style="flex:1;">
+                <div style="font-size:0.85rem;color:#e8ecf4;">${title}</div>
+                <div style="font-size:0.7rem;color:var(--text-dim);">${msgCount} 条消息 · ${time}${sceneNames ? ' · 📋' + sceneNames : ''}</div>
+            </div>
+        </div>`;
+    }).join('');
+    listEl.querySelectorAll('.scene-check-row').forEach(row => {
+        row.addEventListener('click', function(e) {
+            if (e.target.tagName === 'INPUT') return;
+            const radio = this.querySelector('input');
+            radio.checked = true;
+            updateChatSelection();
+        });
+        row.querySelector('input').addEventListener('change', updateChatSelection);
+    });
+}
+
+function updateChatSelection() {
+    const radio = document.querySelector('#ctxModalList input[name=\"chatSelect\"]:checked');
+    if (radio) {
+        selectedChatId = radio.value;
+        const conv = loadLocalConv(selectedChatId);
+        selectedChatTitle = conv ? (conv.title || '新对话') : '';
+        document.getElementById('ctxChatLabel').textContent = selectedChatTitle.substring(0, 8) + (selectedChatTitle.length > 8 ? '…' : '');
+        document.getElementById('ctxChatLabel').style.opacity = '1';
+        document.getElementById('ctxChatLabel').style.color = '#c4b5fd';
+    } else {
+        selectedChatId = null;
+        selectedChatTitle = '';
+        document.getElementById('ctxChatLabel').textContent = '—';
+        document.getElementById('ctxChatLabel').style.opacity = '0.5';
+        document.getElementById('ctxChatLabel').style.color = '';
+    }
+    document.getElementById('ctxModalHint2').textContent = selectedChatId ? '已选择' : '未选择';
+    document.getElementById('ctxModalClearBtn').style.display = selectedChatId ? 'inline-block' : 'none';
+    document.querySelectorAll('#ctxModalList .scene-check-row').forEach(row => {
+        const radio = row.querySelector('input');
+        row.classList.toggle('checked', radio.checked);
+    });
+}
+
+function closeInferPanel() {
+    document.getElementById('inferPanel').classList.remove('open');
+}
+
+async function wargameStart() {
+    let node = _pinnedNode || selectedNode;
+    if (!node) {
+        const all = _getNodes ? _getNodes() : [];
+        if (all.length > 0) { node = all[0]; _pinnedNode = node; selectedNode = node; }
+    }
+    if (!node) { alert('请先点击画布中的实体节点'); return; }
+
+    // 关闭属性侧边栏，避免重叠
+    closeSidebar();
+
+    const panel = document.getElementById('inferPanel');
+    const content = document.getElementById('inferContent');
+
+    // 打开面板 + loading
+    panel.classList.add('open');
+    const nodeName = node.data?.label || '#' + node.id;
+    const nodeProps = node.data?.props || {};
+    const nodeCode = nodeProps.code || nodeProps.id || String(node.id);
+    const nodeId = node.id;
+
+    // 从当前画布边中找该节点的第一条关系类型
+    let relation = '移动';
+    try {
+        const edges = _getEdges ? _getEdges() : [];
+        const relEdge = edges.find(e => e.source === node.id || e.target === node.id);
+        if (relEdge?.label) relation = relEdge.label;
+    } catch (_) {}
+
+    const confEnabled = document.getElementById('confidenceEnable')?.checked;
+    const conf = confEnabled ? (parseFloat(document.getElementById('confidenceVal')?.value || '0.00') || 0.00) : null;
+    const copeVersion = nodeProps.cope_version || nodeProps.version || '0';
+
+    // 构建上下文参数（场景或对话，互斥）
+    const ctxArgs = {};
+    if (ctxMode === 'scene' && selectedSceneIds.length > 0) {
+        ctxArgs.scenes = selectedSceneIds;
+    } else if (ctxMode === 'chat' && selectedChatId) {
+        const chatConv = loadLocalConv(selectedChatId);
+        if (chatConv && chatConv.messages && chatConv.messages.length > 0) {
+            ctxArgs.chat_id = selectedChatId;
+            ctxArgs.chat_history = chatConv.messages;  // 完整对话历史
+        }
+    }
+
+    const inferPayload = {
+        name: 'infer_forward',
+        arguments: { code: nodeCode, name: nodeName, relation, cope_version: copeVersion, depth: 3, direction: 'outgoing', ...(conf !== null ? { confidence_threshold: conf } : {}), ...ctxArgs },
+    };
+    console.group('%c⚔️ 沙盘推演 %c' + nodeName,
+        'color:#f59e0b;font-weight:bold', 'color:#d4d0c0');
+    console.log('推理工具:', inferPayload.name);
+    console.log('推理参数:', inferPayload.arguments);
+    console.log('请求 URL:', INFER_URL);
+    const inferStart = performance.now();
+
+    let ctxInfo = '';
+    if (ctxArgs.scenes) {
+        ctxInfo = `　| 📋场景: <span>${ctxArgs.scenes.length} 个</span>`;
+    } else if (ctxArgs.chat_id) {
+        ctxInfo = `　| 💬对话: <span>${(selectedChatTitle || ctxArgs.chat_id).substring(0, 10)}…</span>`;
+    }
+    content.innerHTML = `
+        <h3><span class="dot"></span> 推演推理结果</h3>
+        <div class="infer-params">
+            📋 推理参数<br/>
+            Code: <span>${escHtml(nodeCode)}</span>　|
+            名称: <span>${escHtml(nodeName)}</span>　|
+            关系: <span>${escHtml(relation)}</span>　|
+            置信度: <span>${conf !== null ? conf.toFixed(2) : '停用'}</span>　|
+            版本: <span>${escHtml(copeVersion)}</span>${ctxInfo}
+        </div>
+        <div class="infer-loading"><div class="ot-spinner"></div>推理中...</div>`;
+
+    try {
+
+        const resp = await fetch(INFER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(inferPayload),
+        });
+
+        const inferElapsed = (performance.now() - inferStart).toFixed(0);
+
+        // ── 非 2xx 响应：提取错误详情，不吞掉 ──
+        if (!resp.ok) {
+            let errDetail = '';
+            try {
+                const errJson = await resp.json();
+                errDetail = errJson.detail || JSON.stringify(errJson, null, 2);
+            } catch (_) {
+                errDetail = await resp.text().catch(() => '');
+            }
+            console.error('%c❌ 推演失败 HTTP ' + resp.status + ' %c(' + inferElapsed + 'ms)',
+                'color:#ef4444;font-weight:bold', 'color:#9ca18c');
+            console.error('错误详情:', errDetail);
+            console.groupEnd();
+            throw new Error('HTTP ' + resp.status + ' — ' + (errDetail || '(无详情)'));
+        }
+
+        const raw = await resp.json();
+        // 解包 Rust 响应: { tool, ok, result: {...} }
+        const result = raw.result || raw;
+
+        console.log('%c✅ 推演完成 HTTP ' + resp.status + ' %c(' + inferElapsed + 'ms)',
+            'color:#10b981;font-weight:bold', 'color:#9ca18c');
+        console.log('原始响应:', raw);
+        console.log('推理结果:', result);
+        console.groupEnd();
+
+        content.innerHTML = `
+            <h3><span class="dot"></span> 推演推理结果</h3>
+            <div class="infer-params">
+                📋 Code: <span>${escHtml(nodeCode)}</span>　|
+                名称: <span>${escHtml(nodeName)}</span>　|
+                关系: <span>${escHtml(relation)}</span>　|
+                置信度: <span>${conf !== null ? conf.toFixed(2) : '停用'}</span>${ctxInfo}
+            </div>
+            <div class="infer-result">${escHtml(JSON.stringify(result, null, 2))}</div>`;
+    } catch (e) {
+        console.error('%c❌ 推演异常:', 'color:#ef4444', e.message);
+        console.groupEnd();
+        content.innerHTML = `
+            <h3><span class="dot"></span> 推演推理结果</h3>
+            <div class="infer-params">
+                📋 Code: <span>${escHtml(nodeCode)}</span>　|
+                名称: <span>${escHtml(nodeName)}</span>　|
+                关系: <span>${escHtml(relation)}</span>　|
+                置信度: <span>${conf !== null ? conf.toFixed(2) : '停用'}</span>${ctxInfo}
+            </div>
+            <div class="infer-error">❌ 推理失败<br/><br/><b>错误详情:</b><br/><pre style="white-space:pre-wrap;word-break:break-all;font-size:0.78rem;margin-top:0.4rem;">${escHtml(e.message)}</pre></div>`;
+    }
+}
+
+function addNode() {
+    selectedNode = null; selectedEdge = null;
+    sidebarMode = 'add';
+    openSidebar();
+}
+
+async function deleteSelected() {
+    if (selectedNode) {
+        if (!confirm('确定删除实体 "' + (selectedNode.data?.label || selectedNode.id) + '" 及其所有关系？')) return;
+        try {
+            await api('/nodes/' + selectedNode.id, { method: 'DELETE' });
+            const deletedId = selectedNode.id;
+            closeSidebar();
+            // 无刷新更新画布
+            if (_lastNeighborId && _lastNeighborId !== deletedId) {
+                loadNeighborhood(_lastNeighborId);
+            } else {
+                _lastNeighborId = null;
+                loadAndRender();
+            }
+        } catch (e) { alert('删除失败: ' + e.message); }
+    } else if (selectedEdge) {
+        if (!confirm('确定删除该关系？')) return;
+        try {
+            await api('/edges/' + selectedEdge.id, { method: 'DELETE' });
+            closeSidebar();
+            if (_lastNeighborId) {
+                loadNeighborhood(_lastNeighborId);
+            } else {
+                loadAndRender();
+            }
+        } catch (e) { alert('删除失败: ' + e.message); }
+    } else {
+        alert('请先点击选择实体或关系');
+    }
+}
+
+async function loadNeighborhood(nodeId) {
+    try {
+        // 递归拉取全部下级节点（BFS，最多 30 轮）
+        const seenIds = new Set();
+        const nodeMap = {};   // id -> raw node data
+        const edgeMap = {};   // edgeKey -> edge object
+        const queue = [nodeId];
+        let round = 0;
+        const MAX_ROUNDS = 30;
+
+        while (queue.length > 0 && round < MAX_ROUNDS) {
+            round++;
+            // 每轮并行 3 个邻域查询
+            const batch = queue.splice(0, Math.min(3, queue.length));
+            const results = await Promise.allSettled(
+                batch.map(id => api('/neighborhood/' + id + '?depth=1'))
+            );
+
+            for (const result of results) {
+                if (result.status !== 'fulfilled') continue;
+                const data = result.value;
+                if (!data.node) continue;
+
+                // 中心节点
+                const cid = String(data.node.id);
+                if (!nodeMap[cid]) {
+                    nodeMap[cid] = data.node;
+                    seenIds.add(cid);
+                }
+
+                for (const nb of (data.neighbors || [])) {
+                    const nid = String(nb.node_id);
+                    // 新发现的节点加入队列
+                    if (!seenIds.has(nid)) {
+                        nodeMap[nid] = {
+                            id: nb.node_id,
+                            labels: nb.labels || [],
+                            properties: nb.properties || {},
+                        };
+                        seenIds.add(nid);
+                        queue.push(nid);
+                    }
+                    // 收集边
+                    if (nb.edge) {
+                        const ekey = String(nb.edge.id || (cid + '-' + nid + '-' + nb.edge.type));
+                        if (!edgeMap[ekey]) {
+                            edgeMap[ekey] = {
+                                id: ekey,
+                                source: cid,
+                                target: nid,
+                                type: 'smoothstep',
+                                label: nb.edge.type,
+                                markerEnd: { type: 'arrowclosed', color: '#9ca18c' },
+                                style: { stroke: '#9ca18c' },
+                                data: { type: nb.edge.type, props: nb.edge.properties || {} },
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
+        const allNodes = Object.values(nodeMap).map(toFlowNode);
+        const allEdges = Object.values(edgeMap);
+        if (_setNodes && _setEdges) {
+            _setNodes(allNodes);
+            _setEdges(allEdges);
+            _lastNeighborId = nodeId;
+            const centerName = nodeMap[nodeId]?.properties?.name || nodeMap[nodeId]?.properties?.title || '#' + nodeId;
+            document.getElementById('nodeCount').textContent =
+                `实体: ${allNodes.length} | 关系: ${allEdges.length} (子图: ${centerName})`;
+            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 150);
+        }
+    } catch (e) { console.error('邻域查询失败:', e); }
+}
+
+async function searchNodes() {
+    const kw = document.getElementById('searchInput')?.value?.trim();
+    if (!kw) { alert('请输入搜索关键词'); return; }
+    try {
+        const results = await api('/search?keyword=' + encodeURIComponent(kw) + '&limit=30');
+        if (!results.length) { alert('未找到匹配实体'); return; }
+        // 逐个加载详情（含关系）
+        const allNodes = [];
+        for (const n of results) {
+            try {
+                const detail = await api('/nodes/' + n.id);
+                allNodes.push(detail);
+            } catch (_) { allNodes.push(n); }
+        }
+        const ns = allNodes.map(toFlowNode);
+        const es = toFlowEdges(allNodes);
+        // 直接更新 ReactFlow 画布
+        if (_setNodes && _setEdges) {
+            _setNodes(ns);
+            _setEdges(es);
+            document.getElementById('nodeCount').textContent =
+                `实体: ${ns.length} | 关系: ${es.length} (搜索: ${kw})`;
+            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 100);
+        }
+    } catch (e) { alert('搜索失败: ' + e.message); }
+}
+
+async function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    _lastNeighborId = null;
+    await loadAndRender();
+}
+
+async function loadAndRender() {
+    try {
+        _lastNeighborId = null;
+        const { nodes: nodeData, schema } = await loadData();
+        schemaData = schema;
+        const ns = nodeData.map(toFlowNode);
+        const es = toFlowEdges(nodeData);
+        if (_setNodes && _setEdges) {
+            _setNodes(ns);
+            _setEdges(es);
+            document.getElementById('nodeCount').textContent =
+                `实体: ${schema.node_count || ns.length} | 关系: ${schema.edge_count || es.length}`;
+            setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 400 }), 100);
+        }
+    } catch (e) { alert('加载失败: ' + e.message); }
+}
+
+// ====================================================================
+// 本体子树展开 — 从图数据库查下级节点，按深度从左往右布局
+// ====================================================================
+
+const LAYER_X = 260;
+const NODE_H = 90;
+
+async function _doExpand(node) {
+    if (!_setNodes || !_setEdges) return;
+
+    // 持久保存点击节点，供推演使用
+    _pinnedNode = node;
+    selectedNode = node;
+
+    console.group('%c🌳 展开本体子树 %c' + (node.data?.label || '#' + node.id),
+        'color:#f59e0b;font-weight:bold', 'color:#d4d0c0');
+    console.log('根节点 ID:', node.id, '| 类型:', node.data?.labelType);
+    const expandStart = performance.now();
+
+    try {
+        // ── 1. BFS 遍历: 用 /neighborhood 拉取所有关联节点（出+入双向），最多 5 层 ──
+        const nodeMap = {};   // id → {node data, depth}
+        const edgeList = [];
+        const seen = new Set([Number(node.id)]);
+        const queue = [{id: Number(node.id), depth: 0}];
+        const edgeSeen = new Set();
+        const MAX_DEPTH = 5;
+
+        nodeMap[Number(node.id)] = {
+            id: Number(node.id),
+            labels: [node.data?.labelType || 'Entity'],
+            properties: node.data?.props || {},
+            depth: 0,
+        };
+
+        let totalNeighborCalls = 0;
+        let round = 0;
+        while (queue.length > 0 && round < 50) {
+            round++;
+            const batch = queue.splice(0, Math.min(3, queue.length));
+            totalNeighborCalls += batch.length;
+            console.log(`%c🔄 BFS 第 ${round} 轮 %c— 查询 ${batch.length} 个节点 (队列剩余 ${queue.length})`,
+                'color:#3b82f6', 'color:#9ca18c');
+            const results = await Promise.allSettled(
+                batch.map(d =>
+                    api('/neighborhood/' + d.id + '?depth=1').then(data => ({ parentId: d.id, parentDepth: d.depth, data }))
+                    .catch(() => ({ parentId: d.id, parentDepth: d.depth, data: null }))
+                )
+            );
+
+            for (const result of results) {
+                if (result.status !== 'fulfilled') continue;
+                const { parentId, parentDepth, data } = result.value;
+                if (!data || !data.node) continue;
+
+                for (const nb of (data.neighbors || [])) {
+                    const nid = nb.node_id;
+                    const childDepth = parentDepth + 1;
+                    if (childDepth > MAX_DEPTH) continue;
+
+                    if (!seen.has(nid)) {
+                        seen.add(nid);
+                        nodeMap[nid] = {
+                            id: nid,
+                            labels: nb.labels || [],
+                            properties: nb.properties || {},
+                            depth: childDepth,
+                        };
+                        queue.push({id: nid, depth: childDepth});
+                    }
+
+                    if (nb.edge) {
+                        const ekey = String(nb.edge.id || (parentId + '-' + nid + '-' + nb.edge.type));
+                        if (!edgeSeen.has(ekey)) {
+                            edgeSeen.add(ekey);
+                            edgeList.push({ source: str(parentId), target: str(nid), type: nb.edge.type, eid: ekey });
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 2. 构建树节点 + 布局 (修剪: 只保留离根最近的一条路径) ──
+        // BFS 过程中 depth 已记录最浅深度
+        const depthGroups = {};
+        for (const [nid, entry] of Object.entries(nodeMap)) {
+            const d = entry.depth;
+            if (!depthGroups[d]) depthGroups[d] = [];
+            depthGroups[d].push(entry);
+        }
+
+        const maxDepth = Math.max(0, ...Object.keys(depthGroups).map(Number));
+        const maxSize = Math.max(1, ...Object.values(depthGroups).map(g => g.length));
+        const totalH = maxSize * NODE_H;
+        const baseY = node.position.y - totalH / 2 + NODE_H / 2;
+
+        const newNodes = [], newEdges = [];
+        for (let d = 0; d <= maxDepth; d++) {
+            const group = depthGroups[d] || [];
+            const x = node.position.x + d * LAYER_X;
+            const groupH = group.length * NODE_H;
+            const startY = baseY + (totalH - groupH) / 2;
+
+            group.forEach((entry, i) => {
+                const n = entry;
+                const label = n.labels?.[0] || 'default';
+                const name = n.properties?.name || n.properties?.title || '#' + n.id;
+                const color = LABEL_COLORS[label] || '#9ca18c';
+
+                newNodes.push({
+                    id: str(n.id),
+                    type: 'default',
+                    position: { x, y: startY + i * NODE_H },
+                    data: { label: name, labelType: label, props: n.properties },
+                    style: { borderColor: color },
+                });
+            });
+        }
+
+        // ── 3. 构建边 — 显示集合内所有节点间的连线 ──
+        edgeList.forEach(e => {
+            if (nodeMap[Number(e.source)] && nodeMap[Number(e.target)]) {
+                newEdges.push({
+                    id: e.eid,
+                    source: e.source,
+                    target: e.target,
+                    type: 'smoothstep',
+                    label: e.type,
+                    markerEnd: { type: 'arrowclosed', color: '#9ca18c' },
+                    style: { stroke: '#9ca18c' },
+                });
+            }
+        });
+
+        if (newNodes.length === 0) {
+            console.warn('%c⚠️ 未找到邻域节点', 'color:#f59e0b');
+            console.groupEnd();
+            return;
+        }
+
+        _setNodes(newNodes);
+        _setEdges(newEdges);
+        _lastNeighborId = node.id;
+
+        // 启用推演按钮
+        const btn = document.getElementById('wargameBtn');
+        if (btn) btn.disabled = false;
+
+        document.getElementById('nodeCount').textContent =
+            `实体: ${newNodes.length} | 关系: ${newEdges.length} (子树: ${node.data?.label || '#'+node.id})`;
+
+        const elapsed = (performance.now() - expandStart).toFixed(0);
+        console.log(`%c✅ 展开完成 %c— ${newNodes.length} 个实体, ${newEdges.length} 条关系, BFS ${round} 轮, 共 ${totalNeighborCalls} 次邻域查询, 耗时 ${elapsed}ms`,
+            'color:#10b981;font-weight:bold', 'color:#9ca18c');
+        console.groupEnd();
+
+        setTimeout(() => rfInstance?.fitView({ padding: 0.3, duration: 400 }), 200);
+    } catch (e) {
+        console.error('%c❌ 展开失败:', 'color:#ef4444', e);
+        console.groupEnd();
+    }
+}
+
+function str(v) { return String(v); }
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ====================================================================
+// 侧边栏
+// ====================================================================
+// 侧边栏
+// ====================================================================
+const sidebarEl = document.getElementById('sidebar');
+const sidebarContent = document.getElementById('sidebarContent');
+
+function openSidebar() { sidebarEl.classList.add('open'); renderSidebar(); }
+function closeSidebar() { sidebarEl.classList.remove('open'); selectedNode = null; selectedEdge = null; }
+
+let _addEdgeNodes = []; // 创建关系时的候选实体列表
+
+async function addEdgeSidebar() {
+    selectedNode = null; selectedEdge = null;
+    sidebarMode = 'add-edge';
+    openSidebar();
+    try {
+        const results = await api('/nodes?limit=500');
+        _addEdgeNodes = results;
+        renderSidebar();
+    } catch (_) { _addEdgeNodes = []; }
+}
+
+async function createEdge() {
+    const srcId = Number(document.getElementById('edgeSource')?.value);
+    const tgtId = Number(document.getElementById('edgeTarget')?.value);
+    const relType = document.getElementById('edgeType')?.value?.trim() || '协同';
+    if (!srcId || !tgtId) { alert('请选择源实体和目标实体'); return; }
+    if (srcId === tgtId) { alert('源实体和目标实体不能相同'); return; }
+    try {
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: srcId, target_id: tgtId, rel_type: relType, properties: {} }) });
+        closeSidebar();
+        if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
+    } catch (e) { alert('创建关系失败: ' + e.message); }
+}
+
+function renderSidebar() {
+    const s = sidebarContent;
+
+    // 添加实体模式
+    if (sidebarMode === 'add') {
+        const labels = schemaData.labels.length ? schemaData.labels : ['Entity', 'Class', 'Property', 'Type', 'Patrol', 'Individual'];
+        s.innerHTML = `
+            <h3>创建实体</h3>
+            <label>类型</label>
+            <select id="newLabel">${labels.map(l => `<option value="${l}">${LABEL_NAMES[l] || l}</option>`).join('')}</select>
+            <label>名称 (name)</label>
+            <input id="newName" placeholder="实体名称" />
+            <label>编码 (code)</label>
+            <input id="newCode" placeholder="可选编码" />
+            <div class="btn-row">
+                <button onclick="createNode()">创建</button>
+                <button onclick="closeSidebar()">取消</button>
+            </div>`;
+        return;
+    }
+
+    // 添加关系模式
+    if (sidebarMode === 'add-edge') {
+        const nodeOpts = _addEdgeNodes.map(n => {
+            const name = n.properties?.name || n.properties?.title || '#' + n.id;
+            return `<option value="${n.id}">#${n.id} ${name}</option>`;
+        }).join('');
+        const relTypes = schemaData.relationship_types?.length
+            ? schemaData.relationship_types.map(t => `<option value="${t}">${t}</option>`).join('')
+            : '<option value="协同">协同</option><option value="指挥">指挥</option><option value="支援">支援</option><option value="侦察">侦察</option>';
+        s.innerHTML = `
+            <h3>创建关系</h3>
+            <label>源实体</label>
+            <select id="edgeSource">${nodeOpts}</select>
+            <label>目标实体</label>
+            <select id="edgeTarget">${nodeOpts}</select>
+            <label>关系类型</label>
+            <input id="edgeType" list="relTypesList" placeholder="关系类型，如 协同、指挥" value="协同" />
+            <datalist id="relTypesList">${relTypes}</datalist>
+            <div class="btn-row">
+                <button onclick="createEdge()">创建</button>
+                <button onclick="closeSidebar()">取消</button>
+            </div>`;
+        return;
+    }
+
+    // 查看实体模式
+    if (selectedNode) {
+        const n = selectedNode;
+        const labelRaw = n.data?.labelType || '';
+        const labelName = LABEL_NAMES[labelRaw] || labelRaw;
+        const props = n.data?.props || {};
+        const entries = Object.entries(props).map(([k,v]) =>
+            `<tr><td style="color:#f59e0b">${k}</td><td>${String(v)}</td></tr>`
+        ).join('');
+        s.innerHTML = `
+            <h3>实体属性</h3>
+            <label>ID</label><input value="${n.id}" readonly />
+            <label>类型</label><input value="${labelName}" readonly />
+            <label>名称</label><input id="editName" value="${n.data?.label || ''}" />
+            <div class="tech-line"></div>
+            ${entries ? '<table class="props-table"><tbody>' + entries + '</tbody></table>' : '<p style="color:#9ca18c;font-size:0.8rem;">无属性</p>'}
+            <div class="btn-row">
+                <button onclick="updateNode('${n.id}')">更新名称</button>
+                <button onclick="deleteSelected()" style="border-color:#ef4444;color:#ef4444;">删除</button>
+            </div>`;
+        return;
+    }
+
+    // 在边上插入实体模式
+    if (sidebarMode === 'insert-node' && selectedEdge) {
+        const e = selectedEdge;
+        const labels = schemaData.labels.length ? schemaData.labels : ['Entity', 'Class', 'Property', 'Type', 'Patrol', 'Individual'];
+        const relTypes = schemaData.relationship_types?.length
+            ? schemaData.relationship_types.map(t => `<option value="${t}">${t}</option>`).join('')
+            : '<option value="协同">协同</option><option value="指挥">指挥</option><option value="支援">支援</option><option value="侦察">侦察</option>';
+        s.innerHTML = `
+            <h3>⚡ 边上插入实体</h3>
+            <div style="background:rgba(245,158,11,0.08);padding:0.5rem;border-radius:4px;margin-bottom:0.6rem;font-size:0.75rem;">
+                <div><b>上端:</b> #${e.source} → <b style="color:#f59e0b;">[新实体]</b> → #${e.target}</div>
+            </div>
+            <label>上端关系类型</label>
+            <input id="upperRelType" list="relTypesUpper" placeholder="源→新实体" value="${e.data?.type || e.label || '协同'}" />
+            <datalist id="relTypesUpper">${relTypes}</datalist>
+            <div class="tech-line"></div>
+            <label>新实体类型</label>
+            <select id="midLabel">${labels.map(l => `<option value="${l}">${LABEL_NAMES[l] || l}</option>`).join('')}</select>
+            <label>新实体名称</label>
+            <input id="midName" placeholder="实体名称" />
+            <label>新实体编码</label>
+            <input id="midCode" placeholder="可选编码" />
+            <label style="display:flex;justify-content:space-between;align-items:center;">
+                实体属性 <button onclick="addPropRow()" style="font-size:0.7rem;padding:0.1rem 0.4rem;">＋</button>
+            </label>
+            <div id="propRows"></div>
+            <div class="tech-line"></div>
+            <label>下端关系类型</label>
+            <input id="lowerRelType" list="relTypesLower" placeholder="新实体→目标" value="${e.data?.type || e.label || '协同'}" />
+            <datalist id="relTypesLower">${relTypes}</datalist>
+            <div class="btn-row">
+                <button onclick="insertNodeOnEdge()" style="background:#f59e0b;color:#000;font-weight:600;">插入</button>
+                <button onclick="closeSidebar()">取消</button>
+            </div>`;
+        return;
+    }
+}
+
+async function createNode() {
+    const label = document.getElementById('newLabel')?.value || 'Entity';
+    const name = document.getElementById('newName')?.value?.trim();
+    if (!name) { alert('请输入名称'); return; }
+    const code = document.getElementById('newCode')?.value?.trim();
+    const props = { name };
+    if (code) props.code = code;
+    try { await api('/nodes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label, properties: props }) }); closeSidebar(); loadAndRender(); }
+    catch (e) { alert('创建失败: ' + e.message); }
+}
+
+async function updateNode(id) {
+    const name = document.getElementById('editName')?.value?.trim();
+    if (!name) return;
+    try { await api('/nodes/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ properties: { name } }) }); closeSidebar(); loadAndRender(); }
+    catch (e) { alert('更新失败: ' + e.message); }
+}
+
+function addPropRow(key, val) {
+    const container = document.getElementById('propRows');
+    if (!container) return;
+    const idx = container.children.length;
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;gap:0.3rem;margin-bottom:0.3rem;';
+    div.innerHTML = `<input id="propKey${idx}" placeholder="属性名" value="${key || ''}" style="flex:1;min-width:0;" />
+        <input id="propVal${idx}" placeholder="值" value="${val || ''}" style="flex:1;min-width:0;" />
+        <button onclick="removePropRow(this)" style="flex:0 0 auto;font-size:0.7rem;padding:0.1rem 0.4rem;">✕</button>`;
+    container.appendChild(div);
+}
+
+function removePropRow(btn) { btn.parentElement.remove(); }
+
+async function insertNodeOnEdge() {
+    if (!selectedEdge) return;
+    const upperRel = document.getElementById('upperRelType')?.value?.trim() || '协同';
+    const lowerRel = document.getElementById('lowerRelType')?.value?.trim() || '协同';
+    const midLabel = document.getElementById('midLabel')?.value || 'Entity';
+    const midName = document.getElementById('midName')?.value?.trim();
+    if (!midName) { alert('请输入新实体名称'); return; }
+    const midCode = document.getElementById('midCode')?.value?.trim();
+
+    // 收集动态属性
+    const props = { name: midName };
+    if (midCode) props.code = midCode;
+    const propRows = document.querySelectorAll('#propRows > div');
+    propRows.forEach(row => {
+        const keyEl = row.querySelector('input:first-child');
+        const valEl = row.querySelector('input:nth-child(2)');
+        if (keyEl && valEl && keyEl.value.trim()) {
+            props[keyEl.value.trim()] = valEl.value.trim();
+        }
+    });
+
+    try {
+        // 1. 创建中间实体
+        const newNode = await api('/nodes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label: midLabel, properties: props }) });
+        const midId = newNode.id;
+
+        // 2. 创建上端关系 (源→新)
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: Number(selectedEdge.source), target_id: midId, rel_type: upperRel, properties: {} }) });
+
+        // 3. 创建下端关系 (新→目标)
+        await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: midId, target_id: Number(selectedEdge.target), rel_type: lowerRel, properties: {} }) });
+
+        // 4. 删除原关系
+        await api('/edges/' + selectedEdge.id, { method: 'DELETE' });
+
+        closeSidebar();
+        if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
+    } catch (e) { alert('插入实体失败: ' + e.message); }
+}
+</script>
+{% endblock %}

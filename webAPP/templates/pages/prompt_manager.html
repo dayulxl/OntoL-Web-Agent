@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block title %}场景管理 — LangGraph Cluster{% endblock %}
+<!-- v2 2026-07-10 tree+cards -->
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.pm-layout { display: flex; height: calc(100vh - 60px); background: rgba(8,12,32,0.96); }
+
+/* ===== 左侧树 ===== */
+.pm-sidebar { width: 300px; min-width: 300px; background: rgba(8,12,32,0.96); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; backdrop-filter: blur(12px); }
+.pm-sidebar-header { padding: 1rem 1rem 0.6rem; border-bottom: 1px solid rgba(0,212,255,0.08); flex-shrink: 0; }
+.pm-sidebar-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 0.4rem; font-weight: 600; }
+.pm-tree-wrap { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0.5rem 0; }
+.pm-tree-wrap::-webkit-scrollbar { width: 4px; }
+.pm-tree-wrap::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+.pm-tree, .pm-tree ul { list-style: none; padding: 0; margin: 0; }
+.pm-tree li { position: relative; }
+.pm-tree-item { display: flex; align-items: center; gap: 0.35rem; padding: 0.45rem 1rem; cursor: pointer; border-left: 3px solid transparent; transition: all 0.15s; font-size: 0.82rem; }
+.pm-tree-item:hover { background: rgba(0,212,255,0.05); }
+.pm-tree-item.active { border-left-color: var(--accent); background: rgba(0,212,255,0.08); }
+.pm-tree-item .chevron { font-size: 0.55rem; width: 12px; text-align: center; color: var(--text-dim); transition: transform 0.2s; flex-shrink: 0; }
+.pm-tree-item .chevron.expanded { transform: rotate(90deg); }
+.pm-tree-item .chevron.leaf { visibility: hidden; }
+.pm-tree-item .icon { font-size: 0.75rem; flex-shrink: 0; }
+.pm-tree-item .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-tree-item .badge { font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 3px; flex-shrink: 0; }
+.pm-tree-item .badge.scene { background: rgba(0,212,255,0.1); color: var(--accent); }
+.pm-tree-item .badge.prompt { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.pm-tree-item .badge.sys { background: rgba(239,68,68,0.1); color: #ef4444; }
+.pm-tree-item .tree-actions { display: flex; gap: 2px; margin-left: auto; opacity: 0; transition: opacity 0.15s; }
+.pm-tree-item:hover .tree-actions { opacity: 1; }
+.btn-ico { background: transparent; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; font-size: 0.55rem; padding: 0 3px; border-radius: 2px; line-height: 1.3; }
+.btn-ico:hover { border-color: var(--accent); color: var(--accent); }
+.btn-ico-danger { border-color: transparent; color: #ef4444; }
+.btn-ico-danger:hover { border-color: #ef4444; }
+
+
+/* ===== 右侧主面板 ===== */
+.pm-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.pm-main-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.pm-main-header h2 { margin: 0; font-size: 1rem; }
+.pm-main-body { flex: 1; overflow-y: auto; padding: 1.2rem 1.5rem; }
+.pm-main-body::-webkit-scrollbar { width: 4px; }
+.pm-main-body::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+.pm-empty { text-align: center; color: var(--text-dim); padding: 3rem 1rem; font-size: 0.85rem; }
+
+/* 提示词卡片 */
+.pm-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.8rem; }
+.pm-card { background: #1a2c3d; border: 1px solid rgba(0,212,255,0.25); border-radius: 8px; padding: 1rem 1.2rem; cursor: pointer; transition: border-color 0.2s, background 0.2s; position: relative; }
+.pm-card:hover { border-color: var(--accent); background: #1f3548; }
+.pm-card .card-title { font-size: 0.88rem; font-weight: 600; color: var(--text); margin-bottom: 0.3rem; display: flex; align-items: center; gap: 0.4rem; padding-right: 3rem; }
+.pm-card .card-desc { font-size: 0.72rem; color: var(--text-dim); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pm-card .card-meta { font-size: 0.62rem; color: var(--text-dim); margin-top: 0.5rem; display: flex; gap: 0.8rem; }
+.pm-card .card-actions { position: absolute; top: 0.5rem; right: 0.6rem; display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.pm-card:hover .card-actions { opacity: 1; }
+
+/* 弹窗 */
+.pm-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.pm-modal { background: rgba(8,12,32,0.98); border: 1px solid var(--accent); border-radius: 10px; padding: 1.8rem; width: 650px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+.pm-modal h3 { margin: 0 0 1rem; color: var(--accent); font-size: 1rem; }
+.pm-modal label { display: block; font-size: 0.78rem; color: var(--text-dim); margin: 0.6rem 0 0.2rem; }
+.pm-modal input, .pm-modal textarea { width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: var(--text); padding: 0.5rem; border-radius: 4px; font-size: 0.82rem; outline: none; resize: vertical; }
+.pm-modal input:focus, .pm-modal textarea:focus { border-color: var(--accent); }
+.pm-modal .btn-row { display: flex; gap: 0.6rem; margin-top: 1.2rem; }
+
+.btn { padding: 0.35rem 0.8rem; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font-size: 0.75rem; transition: all 0.2s; }
+.btn:hover { border-color: var(--accent); }
+.btn-accent { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+.btn-danger { border-color: #ef4444; color: #ef4444; }
+.btn-sm { padding: 0.15rem 0.5rem; font-size: 0.65rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pm-layout">
+    <!-- 左侧树 -->
+    <aside class="pm-sidebar">
+        <div class="pm-sidebar-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <div class="pm-sidebar-title" style="margin-bottom:0;">📋 场景目录</div>
+            <button class="btn btn-accent btn-sm" onclick="showSceneForm()">＋ 新建</button>
+        </div>
+        <div class="pm-tree-wrap" id="treeWrap">
+            <ul class="pm-tree" id="pmTree"><div style="text-align:center;color:var(--text-dim);padding:2rem;">加载中...</div></ul>
+        </div>
+        </aside>
+
+    <!-- 右侧卡片列表 -->
+    <main class="pm-main">
+        <div class="pm-main-header" id="mainHeader">
+            <h2 style="color:var(--text-dim);">← 请在左侧选择场景</h2>
+        </div>
+        <div class="pm-main-body" id="mainBody">
+            <div class="pm-empty">选择左侧场景后此处显示提示词列表</div>
+        </div>
+    </main>
+</div>
+
+<!-- 编辑弹窗 -->
+<div id="modalOverlay" class="pm-modal-overlay" style="display:none;" onclick="if(event.target===this)closeModal()">
+    <div class="pm-modal" id="modalBox" onclick="event.stopPropagation()"></div>
+</div>
+
+<script>
+// --- debug helper ---
+const _origFetch = window.fetch;
+window.fetch = function(url, opts) {
+    console.log('%c[PM] fetch','color:#0f0',url);
+    return _origFetch.call(window, url, opts).then(r => {
+        if (!r.ok) console.warn('%c[PM] fetch FAIL','color:red',r.status,url);
+        return r;
+    });
+};
+// ---
+
+const API_SCENES = '/api/v1/scenes';
+const API_PROMPTS = '/api/v1/prompts';
+let treeData = [];        // [{id, scene_name, scene_code, scene_desc, parent_scene_id, scene_is_system, ...}]
+let promptCache = {};     // {sceneId: [prompt, ...]}
+let activeScene = null;
+
+async function apiGet(url) { const r = await fetch(url, {cache:'no-cache'}); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+async function apiPost(url, d) { const r = await fetch(url, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d),cache:'no-cache'}); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+async function apiPut(url, d) { const r = await fetch(url, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d),cache:'no-cache'}); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+async function apiDel(url) { const r = await fetch(url, {method:'DELETE',cache:'no-cache'}); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── 初始化 ──
+async function init() {
+    try { treeData = await apiGet(API_SCENES); } catch(e) { console.error(e); }
+    renderTree();
+    // 展开第一个场景
+    if (treeData.length > 0) selectScene(treeData[0].id);
+}
+init();
+
+// ── 构建树（按 parent_scene_id 分层） ──
+function renderTree() {
+    const root = document.getElementById('pmTree');
+    if (!treeData.length) { root.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:2rem;">暂无场景</div>'; return; }
+
+    const roots = treeData.filter(s => !s.parent_scene_id);
+    let html = '';
+    function buildNode(node, level) {
+        const children = treeData.filter(s => s.parent_scene_id === node.id);
+        const hasChildren = children.length > 0;
+        const prompts = promptCache[node.id] || [];
+        const promptCount = prompts.length;
+        const isSys = node.scene_is_system === '1';
+        const isActive = activeScene && activeScene.id === node.id;
+        html += '<li>';
+        html += `<div class="pm-tree-item${isActive?' active':''}" data-sid="${node.id}" style="padding-left:${1 + level*1.2}rem;" onclick="selectScene('${node.id}')">`;
+        html += `<span class="chevron ${hasChildren?'expanded':'leaf'}">▶</span>`;
+        html += `<span class="icon">${hasChildren?'📂':'📄'}</span>`;
+        html += `<span class="label">${esc(node.name)}</span>`;
+        if (node.code) html += `<span class="badge scene">${esc(node.code)}</span>`;
+        if (promptCount > 0) html += `<span class="badge prompt">${promptCount}</span>`;
+        if (isSys) html += `<span class="badge sys">预设</span>`;
+        html += `<span class="tree-actions" onclick="event.stopPropagation()">`;
+        html += `<button class="btn-ico" onclick="showEditSceneForm('${node.id}')" title="编辑">✏</button>`;
+        if (!isSys) html += `<button class="btn-ico btn-ico-danger" onclick="deleteScene('${node.id}')" title="删除">✕</button>`;
+        html += `</span>`;
+        html += '</div>';
+        if (hasChildren) {
+            html += '<ul>';
+            children.forEach(c => buildNode(c, level + 1));
+            html += '</ul>';
+        }
+        html += '</li>';
+    }
+    roots.forEach(r => buildNode(r, 0));
+    root.innerHTML = html;
+}
+
+// ── 选择场景 ──
+async function selectScene(sceneId) {
+    activeScene = treeData.find(s => s.id === sceneId);
+    renderTree();
+    await loadPrompts(sceneId);
+}
+
+// ── 加载提示词卡片 ──
+async function loadPrompts(sceneId) {
+    const body = document.getElementById('mainBody');
+    const header = document.getElementById('mainHeader');
+    if (!sceneId) { body.innerHTML = '<div class=\"pm-empty\">场景ID为空，请刷新页面重试</div>'; return; }
+    try {
+        const url = `${API_SCENES}/${encodeURIComponent(sceneId)}/prompts`;
+        const prompts = await apiGet(url);
+        promptCache[sceneId] = prompts;
+        renderTree();
+
+        const scene = treeData.find(s => s.id === sceneId);
+        const title = scene ? `${esc(scene.name)}` : sceneId;
+        header.innerHTML = `<h2>💬 ${title} <span style="font-size:0.72rem;color:var(--text-dim);">(${prompts.length} 个提示词)</span></h2>
+            <button class="btn btn-accent btn-sm" onclick="showPromptForm('${sceneId}')">＋ 新建提示词</button>`;
+
+        if (!prompts.length) {
+            body.innerHTML = '<div class="pm-empty">尚无提示词，点击右上角"＋ 新建提示词"创建</div>';
+            return;
+        }
+        body.innerHTML = `<div class="pm-card-grid">${prompts.map(p => `
+            <div class="pm-card" onclick="showPromptForm('${sceneId}','${p.id}')" title="点击编辑提示词">
+                <div class="card-title">📝 ${esc(p.name)}</div>
+                ${p.prompt_description ? `<div class="card-desc" style="color:#f59e0b;">🎯 ${esc(p.prompt_description)}</div>` : ''}
+                ${p.prompt_desc ? `<div class="card-desc">${esc(p.prompt_desc)}</div>` : ''}
+                <div class="card-meta">
+                    <span>🕐 ${(p.create_time||'').substring(0,16)}</span>
+                    ${p.prompt_content ? `<span>📏 ${p.prompt_content.length} 字</span>` : ''}
+                </div>
+                <div class="card-actions" onclick="event.stopPropagation()">
+                    <button class="btn btn-sm btn-danger" onclick="deletePrompt('${p.id}','${sceneId}')" title="删除">🗑</button>
+                </div>
+            </div>
+        `).join('')}</div>`;
+    } catch(e) { body.innerHTML = `<div class="pm-empty">加载失败: ${esc(e.message)}</div>`; }
+}
+
+// ── 提示词详情弹窗（只读） ──
+async function showPromptDetail(promptId, sceneId) {
+    try {
+        const prompts = await apiGet(`${API_SCENES}/${encodeURIComponent(sceneId)}/prompts`);
+        const p = prompts.find(x => x.id === promptId);
+        if (!p) { alert('未找到该提示词'); return; }
+        document.getElementById('modalBox').innerHTML = `
+            <h3>📝 ${esc(p.name)}</h3>
+            ${p.prompt_description?`<div style="color:#f59e0b;font-size:0.78rem;margin-bottom:0.6rem;">🎯 ${esc(p.prompt_description)}</div>`:''}
+            ${p.prompt_desc?`<div style="color:var(--text-dim);font-size:0.75rem;margin-bottom:0.8rem;">${esc(p.prompt_desc)}</div>`:''}
+            <label>提示词内容</label>
+            <div style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;padding:0.8rem;font-size:0.78rem;max-height:300px;overflow-y:auto;white-space:pre-wrap;font-family:'SF Mono','Fira Code',monospace;color:var(--text);">${esc(p.prompt_content||'')}</div>
+            <div class="btn-row">
+                <button class="btn btn-accent btn-sm" onclick="showPromptForm('${sceneId}','${promptId}');document.getElementById('modalOverlay').style.display='none';">✏ 编辑</button>
+                <button class="btn btn-sm" onclick="closeModal()">关闭</button>
+            </div>`;
+        document.getElementById('modalOverlay').style.display = 'flex';
+    } catch(e) { alert('加载详情失败: '+e.message); }
+}
+
+// ── 场景表单 ──
+function showSceneForm() {
+    document.getElementById('modalBox').innerHTML = `
+        <h3>新建场景</h3>
+        <label>场景名称 <span style="color:#ef4444;">*</span></label>
+        <input id="f-name" placeholder="场景名称" maxlength="100" autofocus />
+        <label>场景编码</label>
+        <input id="f-code" placeholder="唯一编码，如 WAR_AIR" maxlength="50" />
+        <label>父级场景</label>
+        <select id="f-parent" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid var(--border);color:var(--text);padding:0.5rem;border-radius:4px;font-size:0.82rem;">
+            <option value="">— 根场景 —</option>
+            ${treeData.map(s => `<option value="${s.id}">${esc(s.name)}${s.code?' ('+esc(s.code)+')':''}</option>`).join('')}
+        </select>
+        <label>场景描述</label>
+        <input id="f-desc" placeholder="可选描述" maxlength="500" />
+        <p style="font-size:0.65rem;color:var(--text-dim);margin-top:0.5rem;">场景ID 由系统自动生成 UUID</p>
+        <div class="btn-row">
+            <button class="btn btn-accent" onclick="createScene()">创建</button>
+            <button class="btn" onclick="closeModal()">取消</button>
+        </div>`;
+    document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+async function createScene() {
+    const name = document.getElementById('f-name')?.value?.trim();
+    if (!name) { alert('请输入场景名称'); return; }
+    const data = {
+        id: '', name: name,
+        code: document.getElementById('f-code')?.value?.trim() || null,
+        parent_scene_id: document.getElementById('f-parent')?.value || null,
+        scene_desc: document.getElementById('f-desc')?.value?.trim() || '',
+    };
+    try {
+        const s = await apiPost(API_SCENES, data);
+        treeData.push(s);
+        closeModal();
+        renderTree();
+        selectScene(s.id);
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+async function deleteScene(sceneId) {
+    if (!confirm('确定删除该场景？')) return;
+    try { await apiDel(`${API_SCENES}/${sceneId}?soft=true`); treeData = treeData.filter(s => s.id !== sceneId); if (activeScene?.id===sceneId) { activeScene=null; document.getElementById('mainBody').innerHTML='<div class="pm-empty">← 请选择场景</div>'; } renderTree(); }
+    catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// ── 编辑场景弹窗 ──
+async function showEditSceneForm(sceneId) {
+    const s = treeData.find(n => n.id === sceneId);
+    if (!s) return;
+    document.getElementById('modalBox').innerHTML = `
+        <h3>编辑场景</h3>
+        <label>场景ID</label>
+        <input value="${esc(s.id)}" readonly style="opacity:0.6;background:rgba(0,0,0,0.2);" />
+        <label>场景名称 <span style="color:#ef4444;">*</span></label>
+        <input id="f-name" value="${esc(s.name)}" maxlength="100" />
+        <label>场景编码</label>
+        <input id="f-code" value="${esc(s.code||'')}" maxlength="50" />
+        <label>父级场景</label>
+        <select id="f-parent" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid var(--border);color:var(--text);padding:0.5rem;border-radius:4px;font-size:0.82rem;">
+            <option value="">— 根场景 —</option>
+            ${treeData.filter(x => x.id !== sceneId).map(x => `<option value="${x.id}" ${s.parent_scene_id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}
+        </select>
+        <label>场景描述</label>
+        <input id="f-desc" value="${esc(s.scene_desc||'')}" maxlength="500" />
+        <div class="btn-row">
+            <button class="btn btn-accent" onclick="updateScene('${sceneId}')">💾 保存</button>
+            <button class="btn" onclick="closeModal()">取消</button>
+        </div>`;
+    document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+async function updateScene(sceneId) {
+    const name = document.getElementById('f-name')?.value?.trim();
+    if (!name) { alert('请输入场景名称'); return; }
+    const data = {
+        name: name,
+        code: document.getElementById('f-code')?.value?.trim() || null,
+        parent_scene_id: document.getElementById('f-parent')?.value || null,
+        scene_desc: document.getElementById('f-desc')?.value?.trim() || '',
+    };
+    try {
+        const updated = await apiPut(`${API_SCENES}/${sceneId}`, data);
+        const idx = treeData.findIndex(s => s.id === sceneId);
+        if (idx >= 0) treeData[idx] = updated;
+        closeModal();
+        renderTree();
+    } catch(e) { alert('更新失败: ' + e.message); }
+}
+
+// ── 提示词表单 ──
+function showPromptForm(sceneId, promptId) {
+    const isEdit = !!promptId;
+    const loadAndShow = async () => {
+        let existing = {};
+        if (isEdit) {
+            try { const prompts = await apiGet(`${API_SCENES}/${sceneId}/prompts`); existing = prompts.find(p => p.id === promptId) || {}; } catch(e) {}
+        }
+        document.getElementById('modalBox').innerHTML = `
+            <h3>${isEdit?'编辑提示词':'新建提示词'}</h3>
+            <label>名称 <span style="color:#ef4444;">*</span></label>
+            <input id="f-pname" value="${esc(existing.name||'')}" placeholder="提示词名称" maxlength="100" />
+            <label>描述（卡片展示）</label>
+            <input id="f-pdesc" value="${esc(existing.prompt_desc||'')}" placeholder="在卡片上展示的简短描述" maxlength="500" />
+            <label>调用时机说明 🎯</label>
+            <input id="f-pdescription" value="${esc(existing.prompt_description||'')}" placeholder="描述什么时候应该调用这个提示词，例如：当用户询问空军作战相关问题时使用" maxlength="500" />
+            <label>提示词内容 <span style="color:#ef4444;">*</span></label>
+            <textarea id="f-pcontent" rows="10" placeholder="系统提示词文本...">${esc(existing.prompt_content||'')}</textarea>
+            <div class="btn-row">
+                <button class="btn btn-accent" onclick="${isEdit?`updatePrompt('${promptId}','${sceneId}')`:`createPrompt('${sceneId}')`}">💾 保存</button>
+                <button class="btn" onclick="closeModal()">取消</button>
+            </div>`;
+        document.getElementById('modalOverlay').style.display = 'flex';
+    };
+    loadAndShow();
+}
+
+async function createPrompt(sceneId) {
+    const name = document.getElementById('f-pname')?.value?.trim();
+    const content = document.getElementById('f-pcontent')?.value?.trim();
+    if (!name || !content) { alert('名称和内容不能为空'); return; }
+    try {
+        await apiPost(`${API_SCENES}/${sceneId}/prompts`, {
+            id: '', scene_id: sceneId, name: name, prompt_content: content,
+            prompt_desc: document.getElementById('f-pdesc')?.value?.trim() || '',
+            prompt_description: document.getElementById('f-pdescription')?.value?.trim() || '',
+        });
+        closeModal();
+        await loadPrompts(sceneId);
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+async function updatePrompt(promptId, sceneId) {
+    const name = document.getElementById('f-pname')?.value?.trim();
+    const content = document.getElementById('f-pcontent')?.value?.trim();
+    if (!name || !content) { alert('名称和内容不能为空'); return; }
+    try {
+        await apiPut(`${API_PROMPTS}/${promptId}`, {
+            name: name, prompt_content: content,
+            prompt_desc: document.getElementById('f-pdesc')?.value?.trim() || '',
+            prompt_description: document.getElementById('f-pdescription')?.value?.trim() || '',
+        });
+        closeModal();
+        await loadPrompts(sceneId);
+    } catch(e) { alert('更新失败: ' + e.message); }
+}
+
+async function deletePrompt(promptId, sceneId) {
+    if (!confirm('确定删除该提示词？')) return;
+    try { await apiDel(`${API_PROMPTS}/${promptId}?soft=true`); await loadPrompts(sceneId); }
+    catch(e) { alert('删除失败: ' + e.message); }
+}
+
+function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
+</script>
+{% endblock %}

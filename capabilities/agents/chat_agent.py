@@ -217,11 +217,11 @@ async def search_ontology_models(keyword: str) -> str:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            """SELECT id, ontol_parent_id, ontol_name, ontol_model_type,
+            """SELECT id, ontol_parent_id, name, ontol_model_type,
                       ontol_model_status, ontol_model_desc
                FROM ontol_model
                WHERE delete_flag = '0'
-                 AND (ontol_name LIKE ? OR ontol_model_desc LIKE ? OR id LIKE ?)
+                 AND (name LIKE ? OR ontol_model_desc LIKE ? OR id LIKE ?)
                LIMIT 30""",
             (f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"),
         ).fetchall()
@@ -261,7 +261,7 @@ async def get_ontology_tree(root_id: str = "M_ROOT") -> str:
                 INNER JOIN tree t ON m.ontol_parent_id = t.id
                 WHERE m.delete_flag = '0'
             )
-            SELECT * FROM tree ORDER BY depth, ontol_model_type, ontol_name""",
+            SELECT * FROM tree ORDER BY depth, ontol_model_type, name""",
             (root_id,),
         ).fetchall()
 
@@ -270,11 +270,11 @@ async def get_ontology_tree(root_id: str = "M_ROOT") -> str:
             node = dict(r)
             # Get attributes for this model
             attrs = conn.execute(
-                """SELECT attr_name, attr_code, attr_data_type, attr_length,
+                """SELECT name, code, attr_data_type, attr_length,
                           attr_required, attr_default_value, attr_desc
                    FROM ontol_model_attr
                    WHERE ontol_model_id = ? AND delete_flag = '0'
-                   ORDER BY attr_code""",
+                   ORDER BY code""",
                 (node["id"],),
             ).fetchall()
             node["attributes"] = [dict(a) for a in attrs]
@@ -312,11 +312,11 @@ async def get_model_detail(model_id: str) -> str:
             return f"未找到模型 '{model_id}'。"
 
         attrs = conn.execute(
-            """SELECT attr_name, attr_code, attr_data_type, attr_length,
+            """SELECT name, code, attr_data_type, attr_length,
                       attr_required, attr_default_value, attr_desc, attr_is_system
                FROM ontol_model_attr
                WHERE ontol_model_id = ? AND delete_flag = '0'
-               ORDER BY attr_code""",
+               ORDER BY code""",
             (model_id,),
         ).fetchall()
 
@@ -475,7 +475,7 @@ def _build_dynamic_prompt(scene_prompts: list[dict]) -> str:
         if not content:
             continue
         catalog_parts.append(
-            f"### 模板{i}: {p.get('prompt_name', '未命名')}\n"
+            f"### 模板{i}: {p.get('name', '未命名')}\n"
             f"**调用时机**: {desc}\n"
             f"**内容**:\n{content}"
         )
@@ -511,7 +511,7 @@ async def create_chat_agent(
 
     Args:
         model_name: LLM 模型 config_id (ontol_llm_config.id)。
-        scene_prompts: 场景提示词列表 [{prompt_name, prompt_description, prompt_content}]。
+        scene_prompts: 场景提示词列表 [{name, prompt_description, prompt_content}]。
                        如果提供，Agent 会根据用户意图动态匹配。
     """
     from capabilities.models.factory import ModelFactory
@@ -539,7 +539,7 @@ async def create_chat_agent(
     llm_iface = factory.create_llm_from_config(
         base_url=row["llm_url"] or "",
         api_key=row["llm_key"] or "",
-        model_name=row["llm_model"] or row["llm_name"],
+        model_name=row["llm_model"] or row["name"],
     )
     llm = await llm_iface.get_llm()
 

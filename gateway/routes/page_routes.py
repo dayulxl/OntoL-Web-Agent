@@ -1,7 +1,7 @@
 """
 页面路由
 -------
-Jinja2 模板渲染和静态文件服务。
+Jinja2 模板渲染和静态文件服务。（模板文件位于 webAPP/templates/）
 """
 from pathlib import Path
 
@@ -13,7 +13,7 @@ from gateway.middleware.auth import request_context
 
 router = APIRouter(tags=["Pages"])
 
-_TPL_DIR = str(Path(__file__).parent.parent / "templates")
+_TPL_DIR = str(Path(__file__).parent.parent.parent / "webAPP" / "templates")
 
 _env = Environment(loader=FileSystemLoader(_TPL_DIR), autoescape=True)
 
@@ -38,30 +38,24 @@ def _render(template_name: str, context: dict) -> HTMLResponse:
 # 路由
 # =========================================================================
 
-@router.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    ctx = request_context.get()
-    return _render("pages/index.html", {
-        "request": request,
-        "trace_id": ctx.get("trace_id", "-"),
-        "user_id": ctx.get("user_id", "anonymous"),
-        "workflows": [],
-    })
+@router.get("/")
+async def dashboard():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/chat", status_code=302)
 
 
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     ctx = request_context.get()
-    from capabilities.models.factory import ModelFactory
-    factory = ModelFactory()
-    default_model_name = factory._config.get("default_llm", "")
 
-    # 解析 default_model 的 provider key，生成 "provider::model" 格式的 value
-    default_provider = factory.provider_for("llm", default_model_name) if default_model_name else None
-    default_model = f"{default_provider}::{default_model_name}" if default_provider and default_model_name else default_model_name
+    model_groups: list[dict] = await _build_model_groups_from_db()
 
-    # 按 provider 分组，下拉框用 <optgroup> 展示
-    model_groups: list[dict] = _build_model_groups(factory)
+    # 默认选中第一个模型
+    default_model = ""
+    for g in model_groups:
+        if g["models"]:
+            default_model = g["models"][0]["id"]
+            break
 
     return _render("pages/chat.html", {
         "request": request,
@@ -72,38 +66,38 @@ async def chat_page(request: Request):
     })
 
 
-def _build_model_groups(factory) -> list[dict]:
-    """按 provider 分组，返回 [{label, models: [{name, display, base_url}]}]。"""
-    import yaml
-    cfg = factory._config
-    llm_cfg = cfg.get("llm", {})
+async def _build_model_groups_from_db() -> list[dict]:
+    """从 ontol_llm_type_config + ontol_llm_config 表构建模型分组。"""
+    import sqlite3
+    from pathlib import Path
 
-    groups = []
-    for provider_key, pconf in llm_cfg.items():
-        models = pconf.get("models", {})
-        if not models:
-            continue
-        base_url = pconf.get("base_url", "") or ""
-        provider_label = pconf.get("provider", provider_key)
+    db_path = Path("infrastructure/db/ontol.db")
+    if not db_path.exists():
+        return []
 
-        # 可读的 group label
-        label_map = {
-            "anthropic": "Anthropic (Claude)",
-            "openai": "OpenAI (GPT)",
-            "custom": "自定义 / vLLM",
-            "llama_cpp": f"llama.cpp ({base_url})" if base_url else "llama.cpp",
-        }
-        label = label_map.get(provider_key, provider_key)
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
 
-        groups.append({
-            "label": label,
-            "models": [
-                {"name": f"{provider_key}::{name}", "display": name}
-                for name in sorted(models.keys())
-            ],
-        })
+    types_rows = conn.execute(
+        "SELECT * FROM ontol_llm_type_config WHERE delete_flag='0' ORDER BY create_time"
+    ).fetchall()
 
-    return groups
+    configs_rows = conn.execute(
+        "SELECT * FROM ontol_llm_config WHERE delete_flag='0' ORDER BY create_time"
+    ).fetchall()
+    conn.close()
+
+    # 按 type_config_id 分组
+    type_map = {t["id"]: {"label": t["name"], "models": []} for t in types_rows}
+    for c in configs_rows:
+        tid = c["llm_type_config_id"]
+        if tid in type_map:
+            type_map[tid]["models"].append({
+                "id": c["id"],
+                "name": c["name"],
+            })
+
+    return [v for v in type_map.values() if v["models"]]
 
 
 @router.get("/workflow/{name}", response_class=HTMLResponse)
@@ -187,20 +181,11 @@ async def reasoner_world_page(request: Request):
     })
 
 
-@router.get("/dictionary", response_class=HTMLResponse)
-async def dictionary_page(request: Request):
-    ctx = request_context.get()
-    return _render("pages/dictionary.html", {
-        "request": request,
-        "trace_id": ctx.get("trace_id", "-"),
-        "user_id": ctx.get("user_id", "anonymous"),
-    })
-
 
 @router.get("/metadata", response_class=HTMLResponse)
 async def metadata_page(request: Request):
     ctx = request_context.get()
-    return _render("pages/metadata.html", {
+    return _render("pages/dictionary.html", {
         "request": request,
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),
@@ -217,10 +202,40 @@ async def data_ingestion_page(request: Request):
     })
 
 
+@router.get("/datamanage", response_class=HTMLResponse)
+async def datamanage_page(request: Request):
+    ctx = request_context.get()
+    return _render("pages/datamanage.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })
+
+
 @router.get("/intelligence", response_class=HTMLResponse)
 async def intelligence_page(request: Request):
     ctx = request_context.get()
     return _render("pages/intelligence.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })
+
+
+@router.get("/llm-config", response_class=HTMLResponse)
+async def llm_config_page(request: Request):
+    ctx = request_context.get()
+    return _render("pages/llm_config.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })
+
+
+@router.get("/prompt-manager", response_class=HTMLResponse)
+async def prompt_manager_page(request: Request):
+    ctx = request_context.get()
+    return _render("pages/prompt_manager.html", {
         "request": request,
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),

@@ -7,11 +7,14 @@ SQLite 文件数据库
 接口兼容 BaseRepository 风格，参数占位符自动转为 ?。
 """
 import asyncio
+import logging
 import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "ontol.db"
 
@@ -25,28 +28,18 @@ _PG_PLACEHOLDER = re.compile(r'\$(\d+)')
 
 
 def _adapt_pg_sql(sql: str, params: tuple) -> tuple[str, tuple]:
-    """将 PostgreSQL SQL + 参数转换为 SQLite 兼容形式。
-
-    处理：
-    - $1, $2, ... 占位符 → ? （按出现顺序展开参数）
-    - ILIKE → LIKE
-    - 同一 $N 多次出现时，自动复制对应参数值
-    """
+    """将 PostgreSQL SQL + 参数转换为 SQLite 兼容形式。"""
     matches = list(_PG_PLACEHOLDER.finditer(sql))
     if not matches:
         sql = sql.replace('ILIKE', 'LIKE')
         return sql, params
-
-    # 按 $N 出现顺序构建新参数列表
     new_params: list = []
     for m in matches:
-        idx = int(m.group(1)) - 1  # $1 → params[0]
+        idx = int(m.group(1)) - 1
         if idx < len(params):
             new_params.append(params[idx])
         else:
-            new_params.append(None)  # 超出范围（通常不会发生）
-
-    # 替换所有 $N → ?
+            new_params.append(None)
     sql = _PG_PLACEHOLDER.sub('?', sql)
     sql = sql.replace('ILIKE', 'LIKE')
     return sql, tuple(new_params)
@@ -77,7 +70,6 @@ class _Conn:
         cur = self._conn.execute(sql, params)
         rowcount = cur.rowcount
         self._conn.commit()
-        # 兼容 BaseRepository.delete() 的返回值匹配 ("UPDATE 1" / "DELETE 1")
         verb = (sql.strip().split() or [""])[0].upper()
         return f"{verb} {rowcount}"
 
@@ -93,23 +85,18 @@ class _Conn:
 
 class _AcquireContext:
     """异步上下文管理器，模拟 asyncpg pool.acquire() 的返回对象。"""
-
     def __init__(self, conn: _Conn):
         self._conn = conn
-
     async def __aenter__(self) -> _Conn:
         return self._conn
-
     async def __aexit__(self, *args) -> None:
         pass
 
 
 class _Pool:
-    """伪连接池 — 单连接实现 acquire() 兼容接口，支持 async with。"""
-
+    """伪连接池 — 单连接实现 acquire() 兼容接口。"""
     def __init__(self, path: str):
         self._conn = _Conn(path)
-
     def acquire(self) -> _AcquireContext:
         return _AcquireContext(self._conn)
 
@@ -129,12 +116,34 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     # ------------------------------------------------------------------
     # 建表
     # ------------------------------------------------------------------
+
+    # ── 本体模型表 ──
+    _conn._exec("""
+        CREATE TABLE IF NOT EXISTS ontol_model (
+            id                TEXT PRIMARY KEY,
+            ontol_parent_id   TEXT,
+            name              TEXT    NOT NULL,
+            ontol_model_type  TEXT    NOT NULL,
+            ontol_model_status TEXT   NOT NULL DEFAULT '0',
+            ontol_model_desc  TEXT,
+            code              TEXT,
+            create_id         TEXT,
+            create_time       TEXT    NOT NULL DEFAULT (datetime('now')),
+            update_id         TEXT,
+            update_time       TEXT,
+            delete_flag       TEXT    NOT NULL DEFAULT '0',
+            is_system         TEXT    NOT NULL DEFAULT '0',
+            FOREIGN KEY (ontol_parent_id) REFERENCES ontol_model(id) ON DELETE CASCADE
+        )
+    """)
+
+    # ── 本体模型属性表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_model_attr (
             id                    TEXT PRIMARY KEY,
             ontol_model_id        TEXT    NOT NULL,
-            attr_name             TEXT    NOT NULL,
-            attr_code             TEXT    NOT NULL,
+            name                  TEXT    NOT NULL,
+            code                  TEXT    NOT NULL,
             attr_data_type        TEXT    NOT NULL DEFAULT 'VARCHAR',
             attr_length           TEXT,
             attr_digit            TEXT,
@@ -150,6 +159,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             create_id             TEXT,
             create_time           TEXT    NOT NULL DEFAULT (datetime('now')),
             delete_flag           TEXT    NOT NULL DEFAULT '0',
+            is_system             TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (ontol_model_id) REFERENCES ontol_model(id) ON DELETE CASCADE
         )
     """)
@@ -164,46 +174,46 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     ]:
         _conn._exec(idx_sql)
 
-    # ── ontol_code 唯一索引 ──
+    # ── code 唯一索引 ──
     _conn._exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_om_code_active "
-        "ON ontol_model(ontol_code) WHERE delete_flag = '0'"
+        "ON ontol_model(code) WHERE delete_flag = '0'"
     )
 
-    # 清理重复编码后再建唯一索引
+    # 字段编码在活跃记录中唯一
     _conn._exec("""
         DELETE FROM ontol_model_attr
         WHERE rowid NOT IN (
             SELECT MIN(rowid) FROM ontol_model_attr
             WHERE delete_flag = '0'
-            GROUP BY attr_code
+            GROUP BY code
         )
         AND delete_flag = '0'
     """)
-    # 字段编码在活跃记录中唯一（软删除的可重复）
     _conn._exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_oma_code_active "
-        "ON ontol_model_attr(attr_code) WHERE delete_flag = '0'"
+        "ON ontol_model_attr(code) WHERE delete_flag = '0'"
     )
 
     # ── 场景表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_model_scene (
             id               TEXT PRIMARY KEY,
-            scene_name       TEXT    NOT NULL,
+            name             TEXT    NOT NULL,
             scene_desc       TEXT,
             parent_scene_id  TEXT,
-            scene_code       TEXT,
+            code             TEXT,
             scene_is_system  TEXT    NOT NULL DEFAULT '0',
             create_id        TEXT,
             create_time      TEXT    NOT NULL DEFAULT (datetime('now')),
             delete_flag      TEXT    NOT NULL DEFAULT '0',
+            is_system        TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (parent_scene_id) REFERENCES ontol_model_scene(id) ON DELETE SET NULL
         )
     """)
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_oms_del ON ontol_model_scene(delete_flag)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_osc_code_active ON ontol_model_scene(scene_code) WHERE delete_flag='0' AND scene_code IS NOT NULL AND scene_code != ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_osc_code_active ON ontol_model_scene(code) WHERE delete_flag='0' AND code IS NOT NULL AND code != ''",
     ]:
         _conn._exec(idx_sql)
 
@@ -212,13 +222,14 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         CREATE TABLE IF NOT EXISTS ontol_scene_prompt (
             id                 TEXT PRIMARY KEY,
             scene_id           TEXT    NOT NULL,
-            prompt_name        TEXT    NOT NULL,
+            name               TEXT    NOT NULL,
             prompt_content     TEXT    NOT NULL,
             prompt_desc        TEXT,
             prompt_description TEXT,
             create_id          TEXT,
             create_time        TEXT    NOT NULL DEFAULT (datetime('now')),
             delete_flag        TEXT    NOT NULL DEFAULT '0',
+            is_system          TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (scene_id) REFERENCES ontol_model_scene(id) ON DELETE CASCADE
         )
     """)
@@ -233,12 +244,13 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         CREATE TABLE IF NOT EXISTS ontol_scene_dictionary (
             id                    TEXT PRIMARY KEY,
             scene_id              TEXT    NOT NULL,
-            dictionary_name       TEXT    NOT NULL,
-            dictionary_code       TEXT,
+            name                  TEXT    NOT NULL,
+            code                  TEXT,
             dictionary_type_id    TEXT,
             dictionary_content    TEXT,
             create_time           TEXT    NOT NULL DEFAULT (datetime('now')),
             delete_flag           TEXT    NOT NULL DEFAULT '0',
+            is_system             TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (scene_id) REFERENCES ontol_model_scene(id) ON DELETE CASCADE,
             FOREIGN KEY (dictionary_type_id) REFERENCES ontol_dictionary_type(id) ON DELETE SET NULL
         )
@@ -248,24 +260,16 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "CREATE INDEX IF NOT EXISTS idx_osd_del   ON ontol_scene_dictionary(delete_flag)",
     ]:
         _conn._exec(idx_sql)
-    # 迁移：dictionary_type → dictionary_type_id
-    osd_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_scene_dictionary')")]
-    if "dictionary_type" in osd_cols and "dictionary_type_id" not in osd_cols:
-        _conn._exec("ALTER TABLE ontol_scene_dictionary DROP COLUMN dictionary_type")
-    if "dictionary_type_id" not in osd_cols:
-        _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN dictionary_type_id TEXT")
-    if "dictionary_code" not in osd_cols:
-        _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN dictionary_code TEXT")
     _conn._exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_osd_code_active "
-        "ON ontol_scene_dictionary(dictionary_code) WHERE delete_flag='0' AND dictionary_code IS NOT NULL AND dictionary_code != ''"
+        "ON ontol_scene_dictionary(code) WHERE delete_flag='0' AND code IS NOT NULL AND code != ''"
     )
 
     # ── 词典类型表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_dictionary_type (
             id                      TEXT PRIMARY KEY,
-            dictionary_type_name    TEXT    NOT NULL,
+            name                    TEXT    NOT NULL,
             dictionary_description  TEXT,
             is_system               TEXT    NOT NULL DEFAULT '0',
             create_time             TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -278,7 +282,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_datasource_type (
             id                      TEXT PRIMARY KEY,
-            datasource_type_name    TEXT    NOT NULL,
+            name                    TEXT    NOT NULL,
             datasource_description  TEXT,
             is_system               TEXT    NOT NULL DEFAULT '0',
             create_time             TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -288,7 +292,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_odst_del ON ontol_datasource_type(delete_flag)")
     _conn._exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_odst_name_active "
-        "ON ontol_datasource_type(datasource_type_name) WHERE delete_flag = '0'"
+        "ON ontol_datasource_type(name) WHERE delete_flag = '0'"
     )
 
     # ── 数据源配置表 ──
@@ -305,6 +309,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             created_by               TEXT    NOT NULL DEFAULT '',
             create_time              TEXT    NOT NULL DEFAULT (datetime('now')),
             ontol_datasource_type_id TEXT,
+            is_system                TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (ontol_datasource_type_id) REFERENCES ontol_datasource_type(id) ON DELETE SET NULL
         )
     """)
@@ -317,6 +322,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             biz_id                TEXT    NOT NULL DEFAULT '',
             batch_no              TEXT,
             create_time           TEXT    NOT NULL DEFAULT (datetime('now')),
+            is_system             TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (ontol_datasource_id) REFERENCES ontol_datasource(id) ON DELETE CASCADE
         )
     """)
@@ -354,33 +360,19 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     ]:
         _conn._exec(idx_sql)
 
-    # 迁移：关联表补充 name/code 字段
-    _RELATION_TABLES = [
-        "ontol_scene_dictionary_relation",
-    ]
-    for tbl in _RELATION_TABLES:
-        cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
-        if "name" not in cols:
-            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN name TEXT NOT NULL DEFAULT ''")
-        if "code" not in cols:
-            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN code TEXT NOT NULL DEFAULT ''")
-            _conn._exec(
-                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl}_code_active "
-                f"ON {tbl}(code) WHERE delete_flag = 0"
-            )
-
     # ── LLM 模型配置表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_llm_config (
             id                  TEXT PRIMARY KEY,
             llm_type_config_id  TEXT,
-            llm_name            TEXT    NOT NULL,
+            name                TEXT    NOT NULL,
             llm_model           TEXT,
             llm_url             TEXT,
             llm_key             TEXT,
             llm_description     TEXT,
             create_time         TEXT    NOT NULL DEFAULT (datetime('now')),
             delete_flag         TEXT    NOT NULL DEFAULT '0',
+            is_system           TEXT    NOT NULL DEFAULT '0',
             FOREIGN KEY (llm_type_config_id) REFERENCES ontol_llm_type_config(id) ON DELETE SET NULL
         )
     """)
@@ -389,16 +381,12 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "CREATE INDEX IF NOT EXISTS idx_olc_del  ON ontol_llm_config(delete_flag)",
     ]:
         _conn._exec(idx_sql)
-    # 迁移：添加 llm_model 列
-    olc_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_llm_config')")]
-    if "llm_model" not in olc_cols:
-        _conn._exec("ALTER TABLE ontol_llm_config ADD COLUMN llm_model TEXT")
 
     # ── LLM 类型配置表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_llm_type_config (
             id               TEXT PRIMARY KEY,
-            llm_type_name    TEXT    NOT NULL,
+            name             TEXT    NOT NULL,
             llm_description  TEXT,
             is_system        TEXT    NOT NULL DEFAULT '0',
             create_time      TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -411,8 +399,8 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_function (
             id                  TEXT PRIMARY KEY,
-            function_code       TEXT    NOT NULL,
-            function_name       TEXT    NOT NULL DEFAULT '',
+            code                TEXT    NOT NULL,
+            name                TEXT    NOT NULL DEFAULT '',
             function_classpath  TEXT,
             function_method     TEXT,
             function_type       TEXT    NOT NULL DEFAULT 'PYTHON',
@@ -424,39 +412,42 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             create_user         TEXT    NOT NULL DEFAULT '',
             update_time         TEXT    NOT NULL DEFAULT '',
             update_user         TEXT    NOT NULL DEFAULT '',
-            delete_flag         TEXT    NOT NULL DEFAULT '0'
+            delete_flag         TEXT    NOT NULL DEFAULT '0',
+            is_system           TEXT    NOT NULL DEFAULT '0'
         )
     """)
     _conn._exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ofunc_code_active "
-        "ON ontol_function(function_code) WHERE delete_flag = '0'"
+        "ON ontol_function(code) WHERE delete_flag = '0'"
     )
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_del ON ontol_function(delete_flag)")
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_type ON ontol_function(function_type)")
 
-    # 迁移：ontol_function 旧表 function_name → function_code
-    of_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_function')")]
-    if "function_code" not in of_cols and "function_name" in of_cols:
-        try:
-            _conn._exec("ALTER TABLE ontol_function RENAME COLUMN function_name TO function_code")
-        except Exception:
-            pass  # SQLite < 3.25 fallback — 表刚创建无需迁移
-    if "function_name" not in of_cols:
-        _conn._exec("ALTER TABLE ontol_function ADD COLUMN function_name TEXT NOT NULL DEFAULT ''")
+    # ------------------------------------------------------------------
+    # 迁移：旧列名 → 新列名 (RENAME COLUMN)
+    # ------------------------------------------------------------------
+    _COLUMN_RENAMES: dict[str, list[tuple[str, str]]] = {
+        "ontol_model":           [("ontol_name", "name"), ("ontol_code", "code")],
+        "ontol_model_attr":      [("attr_name", "name"), ("attr_code", "code")],
+        "ontol_model_scene":     [("scene_name", "name"), ("scene_code", "code")],
+        "ontol_scene_prompt":    [("prompt_name", "name")],
+        "ontol_scene_dictionary":[("dictionary_name", "name"), ("dictionary_code", "code")],
+        "ontol_dictionary_type": [("dictionary_type_name", "name")],
+        "ontol_datasource_type": [("datasource_type_name", "name")],
+        "ontol_llm_config":      [("llm_name", "name")],
+        "ontol_llm_type_config": [("llm_type_name", "name")],
+        "ontol_function":        [("function_code", "code"), ("function_name", "name")],
+    }
+    for tbl, renames in _COLUMN_RENAMES.items():
+        cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
+        for old, new in renames:
+            if old in cols and new not in cols:
+                try:
+                    _conn._exec(f"ALTER TABLE {tbl} RENAME COLUMN {old} TO {new}")
+                except Exception:
+                    pass  # SQLite < 3.25 退避
 
-    # 迁移：删除已存在的 llm_type 列，添加 is_system 列
-    oltc_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_llm_type_config')")]
-    if "llm_type" in oltc_cols:
-        _conn._exec("ALTER TABLE ontol_llm_type_config DROP COLUMN llm_type")
-    if "is_system" not in oltc_cols:
-        _conn._exec("ALTER TABLE ontol_llm_type_config ADD COLUMN is_system TEXT NOT NULL DEFAULT '0'")
-
-    # ── 迁移：ontol_model_attr 添加排序字段 ──
-    oma_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_model_attr')")]
-    if "attr_order" not in oma_cols:
-        _conn._exec("ALTER TABLE ontol_model_attr ADD COLUMN attr_order INTEGER NOT NULL DEFAULT 0")
-
-    # ── 迁移：标准化通用字段 (id/create_time/create_user/update_time/update_user/delete_flag/is_system) ──
+    # ── 迁移：标准化通用字段 ──
     _MIGRATE_TABLES = [
         "ontol_model",
         "ontol_model_attr",
@@ -484,7 +475,46 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN delete_flag TEXT NOT NULL DEFAULT '0'")
         if "is_system" not in cols:
             _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN is_system TEXT NOT NULL DEFAULT '0'")
-    logger.info("Standard column migration complete", tables=len(_MIGRATE_TABLES))
+
+    # ── 专项迁移：ontol_dictionary_type dictionary_type → dictionary_type_id ──
+    osd_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_scene_dictionary')")]
+    if "dictionary_type" in osd_cols and "dictionary_type_id" not in osd_cols:
+        _conn._exec("ALTER TABLE ontol_scene_dictionary DROP COLUMN dictionary_type")
+    if "dictionary_type_id" not in osd_cols:
+        _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN dictionary_type_id TEXT")
+
+    # ── 专项迁移：ontol_model_attr 排序字段 ──
+    oma_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_model_attr')")]
+    if "attr_order" not in oma_cols:
+        _conn._exec("ALTER TABLE ontol_model_attr ADD COLUMN attr_order INTEGER NOT NULL DEFAULT 0")
+
+    # ── 专项迁移：ontol_llm_config llm_model ──
+    olc_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_llm_config')")]
+    if "llm_model" not in olc_cols:
+        _conn._exec("ALTER TABLE ontol_llm_config ADD COLUMN llm_model TEXT")
+
+    # ── 专项迁移：ontol_scene_dictionary 旧字段 ──
+    if "dictionary_type" in osd_cols and "dictionary_type_id" not in osd_cols:
+        _conn._exec("ALTER TABLE ontol_scene_dictionary DROP COLUMN dictionary_type")
+    if "dictionary_type_id" not in osd_cols:
+        _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN dictionary_type_id TEXT")
+    if "dictionary_code" not in osd_cols and "code" not in osd_cols:
+        _conn._exec("ALTER TABLE ontol_scene_dictionary ADD COLUMN code TEXT")
+
+    # ── 专项迁移：关联表 name/code ──
+    _RELATION_TABLES = ["ontol_scene_dictionary_relation"]
+    for tbl in _RELATION_TABLES:
+        cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
+        if "name" not in cols:
+            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+        if "code" not in cols:
+            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+            _conn._exec(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl}_code_active "
+                f"ON {tbl}(code) WHERE delete_flag = 0"
+            )
+
+    logger.info("Database migration complete", tables=len(_MIGRATE_TABLES))
 
     # ------------------------------------------------------------------
     # 种子数据
@@ -504,15 +534,12 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     ]
     for m in models:
         _conn._exec(
-            "INSERT OR IGNORE INTO ontol_model(id,ontol_code,ontol_parent_id,ontol_name,ontol_model_type,ontol_model_status,ontol_model_desc,create_id,create_time) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO ontol_model(id,code,ontol_parent_id,name,ontol_model_type,ontol_model_status,ontol_model_desc,create_id,create_time) VALUES(?,?,?,?,?,?,?,?,?)",
             m,
         )
 
-    # cols: id, ontol_model_id, attr_name, attr_code, attr_data_type, attr_length, attr_digit,
-    #       attr_is_only, attr_cascade_colum, attr_data_source_flag, attr_data_source,
-    #       attr_required, attr_default_value, attr_is_system, attr_order, attr_desc, create_id, create_time
-    a0 = None  # placeholder for nullable fields
-    a1 = 0     # attr_order default
+    a0 = None
+    a1 = 0
     attrs = [
         ("ATTR_M1_ID",  "M_ENTITY",        "主键ID","id",  "VARCHAR","32", a0,"1",a0,a0,a0,"1",a0,"0",a1,"实体唯一标识符",      "system",now),
         ("ATTR_M1_NAME","M_ENTITY",        "名称",  "name","VARCHAR","100",a0,"0",a0,a0,a0,"1",a0,"0",a1,"实体名称",            "system",now),
@@ -533,7 +560,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     ]
     for a in attrs:
         _conn._exec(
-            "INSERT OR IGNORE INTO ontol_model_attr(id,ontol_model_id,attr_name,attr_code,attr_data_type,attr_length,attr_digit,attr_is_only,attr_cascade_colum,attr_data_source_flag,attr_data_source,attr_required,attr_default_value,attr_is_system,attr_order,attr_desc,create_id,create_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO ontol_model_attr(id,ontol_model_id,name,code,attr_data_type,attr_length,attr_digit,attr_is_only,attr_cascade_colum,attr_data_source_flag,attr_data_source,attr_required,attr_default_value,attr_is_system,attr_order,attr_desc,create_id,create_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             a,
         )
 

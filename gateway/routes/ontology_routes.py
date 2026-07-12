@@ -47,17 +47,17 @@ class ToolsCallBody(BaseModel):
 class OntolModelCreateBody(BaseModel):
     model_config = {"extra": "ignore"}
 
-    ontol_code: str = Field(..., max_length=50, description="本体编码（唯一）")
+    code: str = Field(..., max_length=50, description="本体编码（唯一）")
     ontol_parent_id: Optional[str] = Field(None, max_length=32, description="父级模型ID")
-    ontol_name: str = Field(..., max_length=50, description="本体名称")
+    name: str = Field(..., max_length=50, description="本体名称")
     ontol_model_type: str = Field(..., max_length=2, description="本体类型：M1/M2/M3/M4/M5/M6/M7/ME/MT")
     ontol_model_status: str = Field("0", max_length=2, description="本体状态：0=启用中 1=已停用")
     ontol_model_desc: Optional[str] = Field(None, max_length=255, description="本体描述")
 
 class OntolModelUpdateBody(BaseModel):
     model_config = {"extra": "ignore"}
-    ontol_code: Optional[str] = Field(None, max_length=50)
-    ontol_name: Optional[str] = Field(None, max_length=50)
+    code: Optional[str] = Field(None, max_length=50)
+    name: Optional[str] = Field(None, max_length=50)
     ontol_model_type: Optional[str] = Field(None, max_length=2)
     ontol_model_status: Optional[str] = Field(None, max_length=2)
     ontol_model_desc: Optional[str] = Field(None, max_length=255)
@@ -67,8 +67,8 @@ class OntolModelAttrCreateBody(BaseModel):
 
     id: str = Field(..., max_length=32, description="属性ID（主键）")
     ontol_model_id: Optional[str] = Field(None, max_length=32)
-    attr_name: str = Field(..., max_length=50)
-    attr_code: str = Field(..., max_length=50)
+    name: str = Field(..., max_length=50)
+    code: str = Field(..., max_length=50)
     attr_data_type: str = Field("VARCHAR", max_length=20)
     attr_length: Optional[str] = Field(None, max_length=10)
     attr_digit: Optional[str] = Field(None, max_length=10)
@@ -84,8 +84,8 @@ class OntolModelAttrCreateBody(BaseModel):
 class OntolModelAttrUpdateBody(BaseModel):
     model_config = {"extra": "ignore"}
 
-    attr_name: Optional[str] = Field(None, max_length=50)
-    attr_code: Optional[str] = Field(None, max_length=50)
+    name: Optional[str] = Field(None, max_length=50)
+    code: Optional[str] = Field(None, max_length=50)
     attr_data_type: Optional[str] = Field(None, max_length=20)
     attr_length: Optional[str] = Field(None, max_length=10)
     attr_digit: Optional[str] = Field(None, max_length=10)
@@ -493,7 +493,7 @@ async def search_ontology_models(
             where["ontol_model_type"] = model_type
         if status:
             where["ontol_model_status"] = status
-        return await temp.search(keyword, columns=["ontol_name", "ontol_model_desc"], where=where, limit=limit)
+        return await temp.search(keyword, columns=["name", "ontol_model_desc"], where=where, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Search failed: {e}")
 
@@ -556,7 +556,7 @@ async def get_ontology_model(model_id: str, repo=Depends(get_ontology_repo)):
 
 @router.post("/ontology-models", status_code=201)
 async def create_ontology_model(body: OntolModelCreateBody, repo=Depends(get_ontology_repo)):
-    """创建本体模型（后端生成 UUID 主键，ontol_code 由用户指定并唯一校验）。"""
+    """创建本体模型（后端生成 UUID 主键，code 由用户指定并唯一校验）。"""
     import uuid as _uuid
     data = body.model_dump()
     data["id"] = _uuid.uuid4().hex[:16]  # 主键自动 UUID
@@ -878,24 +878,24 @@ def _load_ontology_types() -> dict:
         for m in models:
             md = dict(m)
             attrs = conn.execute(
-                """SELECT id, attr_name, attr_code, attr_data_type, attr_length,
+                """SELECT id, name, code, attr_data_type, attr_length,
                           attr_required, attr_default_value, attr_desc, attr_order
                    FROM ontol_model_attr
                    WHERE ontol_model_id=? AND delete_flag='0'
-                   ORDER BY attr_order, attr_code""",
+                   ORDER BY attr_order, code""",
                 (md["id"],),
             ).fetchall()
             types[md["id"]] = {
                 "id": md["id"],
-                "name": md["ontol_name"],
+                "name": md["name"],
                 "parent_id": md.get("ontol_parent_id") or None,
                 "type_code": md["ontol_model_type"],
                 "desc": md["ontol_model_desc"] or "",
                 "fields": [
                     {
                         "id": a["id"],
-                        "name": a["attr_name"],
-                        "code": a["attr_code"],
+                        "name": a["name"],
+                        "code": a["code"],
                         "data_type": a["attr_data_type"],
                         "length": a["attr_length"],
                         "required": a["attr_required"],
@@ -1779,15 +1779,15 @@ async def import_triples_to_neo4j(body: ImportTriplesRequest):
 
 class SceneCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="场景ID，留空自动生成UUID")
-    scene_name: str = Field(..., max_length=100, description="场景名称")
-    scene_code: Optional[str] = Field(None, max_length=50, description="场景编码（唯一）")
+    name: str = Field(..., max_length=100, description="场景名称")
+    code: Optional[str] = Field(None, max_length=50, description="场景编码（唯一）")
     scene_desc: Optional[str] = Field(None, max_length=500, description="场景描述")
     parent_scene_id: Optional[str] = Field(None, max_length=32, description="父场景ID")
     create_id: Optional[str] = Field(None, max_length=32, description="创建人ID")
 
 class SceneUpdate(BaseModel):
-    scene_name: Optional[str] = Field(None, max_length=100, description="场景名称")
-    scene_code: Optional[str] = Field(None, max_length=50, description="场景编码")
+    name: Optional[str] = Field(None, max_length=100, description="场景名称")
+    code: Optional[str] = Field(None, max_length=50, description="场景编码")
     scene_desc: Optional[str] = Field(None, max_length=500, description="场景描述")
     parent_scene_id: Optional[str] = Field(None, max_length=32, description="父场景ID")
     delete_flag: Optional[str] = Field(None, max_length=2, description="删除标志")
@@ -1824,7 +1824,7 @@ async def list_scenes(keyword: Optional[str] = None):
     try:
         if keyword:
             rows = await _query_scene(
-                "SELECT * FROM ontol_model_scene WHERE delete_flag='0' AND (scene_name LIKE ? OR scene_desc LIKE ?) ORDER BY create_time DESC",
+                "SELECT * FROM ontol_model_scene WHERE delete_flag='0' AND (name LIKE ? OR scene_desc LIKE ?) ORDER BY create_time DESC",
                 (f"%{keyword}%", f"%{keyword}%"),
             )
         else:
@@ -1866,18 +1866,18 @@ async def create_scene(body: SceneCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Scene ID '{scene_id}' already exists")
 
-        # 检查 scene_code 唯一性
-        if body.scene_code:
+        # 检查 code 唯一性
+        if body.code:
             dup = await _query_scene(
-                "SELECT id FROM ontol_model_scene WHERE scene_code=? AND delete_flag='0'",
-                (body.scene_code,),
+                "SELECT id FROM ontol_model_scene WHERE code=? AND delete_flag='0'",
+                (body.code,),
             )
             if dup:
-                raise HTTPException(status_code=409, detail=f"场景编码 '{body.scene_code}' 已被使用")
+                raise HTTPException(status_code=409, detail=f"场景编码 '{body.code}' 已被使用")
 
         await _execute_scene(
-            "INSERT INTO ontol_model_scene (id, scene_name, scene_code, scene_desc, parent_scene_id, create_id) VALUES (?,?,?,?,?,?)",
-            (scene_id, body.scene_name, body.scene_code or None, body.scene_desc or "", body.parent_scene_id or None, body.create_id or ""),
+            "INSERT INTO ontol_model_scene (id, name, code, scene_desc, parent_scene_id, create_id) VALUES (?,?,?,?,?,?)",
+            (scene_id, body.name, body.code or None, body.scene_desc or "", body.parent_scene_id or None, body.create_id or ""),
         )
         return await get_scene(scene_id)
     except HTTPException:
@@ -1901,22 +1901,22 @@ async def update_scene(scene_id: str, body: SceneUpdate):
 
         # 构建动态 UPDATE
         sets, params = [], []
-        if body.scene_name is not None:
-            sets.append("scene_name=?")
-            params.append(body.scene_name)
+        if body.name is not None:
+            sets.append("name=?")
+            params.append(body.name)
         if body.scene_desc is not None:
             sets.append("scene_desc=?")
             params.append(body.scene_desc)
-        if body.scene_code is not None:
-            if body.scene_code:
+        if body.code is not None:
+            if body.code:
                 dup = await _query_scene(
-                    "SELECT id FROM ontol_model_scene WHERE scene_code=? AND delete_flag='0' AND id!=?",
-                    (body.scene_code, scene_id),
+                    "SELECT id FROM ontol_model_scene WHERE code=? AND delete_flag='0' AND id!=?",
+                    (body.code, scene_id),
                 )
                 if dup:
-                    raise HTTPException(status_code=409, detail=f"场景编码 '{body.scene_code}' 已被使用")
-            sets.append("scene_code=?")
-            params.append(body.scene_code)
+                    raise HTTPException(status_code=409, detail=f"场景编码 '{body.code}' 已被使用")
+            sets.append("code=?")
+            params.append(body.code)
         if body.parent_scene_id is not None:
             sets.append("parent_scene_id=?")
             params.append(body.parent_scene_id if body.parent_scene_id else None)
@@ -2004,7 +2004,7 @@ async def get_chat_scenes(chart_id: str):
     """获取对话绑定的场景列表（带场景名称）。"""
     try:
         rows = await _query_scene(
-            """SELECT r.id, r.chart_id, r.scene_id, s.scene_name, s.scene_desc
+            """SELECT r.id, r.chart_id, r.scene_id, s.name, s.scene_desc
                FROM ontol_char_scene_relation r
                LEFT JOIN ontol_model_scene s ON r.scene_id = s.id
                WHERE r.chart_id=? AND r.delete_flag='0'
@@ -2036,14 +2036,14 @@ async def unbind_chat_scene(relation_id: str):
 class ScenePromptCreate(BaseModel):
     id: str = Field(..., max_length=32, description="提示词ID（主键）")
     scene_id: str = Field(..., max_length=32, description="所属场景ID")
-    prompt_name: str = Field(..., max_length=100, description="提示词名称")
+    name: str = Field(..., max_length=100, description="提示词名称")
     prompt_content: str = Field(default="", description="提示词文本内容")
     prompt_desc: Optional[str] = Field(None, max_length=500, description="提示词描述")
     prompt_description: Optional[str] = Field(None, max_length=500, description="提示词调用时机说明")
     create_id: Optional[str] = Field(None, max_length=32, description="创建人ID")
 
 class ScenePromptUpdate(BaseModel):
-    prompt_name: Optional[str] = Field(None, max_length=100)
+    name: Optional[str] = Field(None, max_length=100)
     prompt_content: Optional[str] = None
     prompt_desc: Optional[str] = Field(None, max_length=500)
     prompt_description: Optional[str] = Field(None, max_length=500)
@@ -2090,8 +2090,8 @@ async def create_prompt(scene_id: str, body: ScenePromptCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Prompt ID '{prompt_id}' already exists")
         await _execute_scene(
-            "INSERT INTO ontol_scene_prompt (id, scene_id, prompt_name, prompt_content, prompt_desc, prompt_description, create_id) VALUES (?,?,?,?,?,?,?)",
-            (prompt_id, scene_id, body.prompt_name, body.prompt_content or "", body.prompt_desc or "", body.prompt_description or "", body.create_id or ""),
+            "INSERT INTO ontol_scene_prompt (id, scene_id, name, prompt_content, prompt_desc, prompt_description, create_id) VALUES (?,?,?,?,?,?,?)",
+            (prompt_id, scene_id, body.name, body.prompt_content or "", body.prompt_desc or "", body.prompt_description or "", body.create_id or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_prompt WHERE id=?", (prompt_id,))
         return rows[0]
@@ -2141,14 +2141,14 @@ async def delete_prompt(prompt_id: str, soft: bool = True):
 class SceneDictCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="词典ID，留空自动生成UUID")
     scene_id: str = Field(..., max_length=32, description="所属场景ID")
-    dictionary_name: str = Field(..., max_length=200, description="词典名称")
-    dictionary_code: Optional[str] = Field(None, max_length=100, description="词典编码")
+    name: str = Field(..., max_length=200, description="词典名称")
+    code: Optional[str] = Field(None, max_length=100, description="词典编码")
     dictionary_type_id: Optional[str] = Field(None, max_length=32, description="词条分类ID")
     dictionary_content: Optional[str] = Field(None, description="词典内容")
 
 class SceneDictUpdate(BaseModel):
-    dictionary_name: Optional[str] = Field(None, max_length=200)
-    dictionary_code: Optional[str] = Field(None, max_length=100)
+    name: Optional[str] = Field(None, max_length=200)
+    code: Optional[str] = Field(None, max_length=100)
     dictionary_type_id: Optional[str] = Field(None, max_length=32)
     dictionary_content: Optional[str] = None
     delete_flag: Optional[str] = Field(None, max_length=2)
@@ -2159,7 +2159,7 @@ async def list_scene_dicts(scene_id: str):
     """列出场景下的所有词典，连带词条分类名。"""
     try:
         rows = await _query_scene(
-            """SELECT d.*, dt.dictionary_type_name
+            """SELECT d.*, dt.name
                FROM ontol_scene_dictionary d
                LEFT JOIN ontol_dictionary_type dt ON d.dictionary_type_id = dt.id
                WHERE d.scene_id=? AND d.delete_flag='0'
@@ -2177,7 +2177,7 @@ async def list_all_dicts(dictionary_type_id: str = ""):
     try:
         if dictionary_type_id:
             rows = await _query_scene(
-                """SELECT d.*, s.scene_name, dt.dictionary_type_name
+                """SELECT d.*, s.name, dt.name
                    FROM ontol_scene_dictionary d
                    LEFT JOIN ontol_model_scene s ON d.scene_id = s.id
                    LEFT JOIN ontol_dictionary_type dt ON d.dictionary_type_id = dt.id
@@ -2187,7 +2187,7 @@ async def list_all_dicts(dictionary_type_id: str = ""):
             )
         else:
             rows = await _query_scene(
-                """SELECT d.*, s.scene_name, dt.dictionary_type_name
+                """SELECT d.*, s.name, dt.name
                    FROM ontol_scene_dictionary d
                    LEFT JOIN ontol_model_scene s ON d.scene_id = s.id
                    LEFT JOIN ontol_dictionary_type dt ON d.dictionary_type_id = dt.id
@@ -2209,8 +2209,8 @@ async def create_dict_direct(body: SceneDictCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
         await _execute_scene(
-            "INSERT INTO ontol_scene_dictionary (id, scene_id, dictionary_name, dictionary_code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
-            (dict_id, body.scene_id, body.dictionary_name, body.dictionary_code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
+            "INSERT INTO ontol_scene_dictionary (id, scene_id, name, code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
+            (dict_id, body.scene_id, body.name, body.code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         return rows[0]
@@ -2245,8 +2245,8 @@ async def create_dict(scene_id: str, body: SceneDictCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
         await _execute_scene(
-            "INSERT INTO ontol_scene_dictionary (id, scene_id, dictionary_name, dictionary_code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
-            (dict_id, scene_id, body.dictionary_name, body.dictionary_code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
+            "INSERT INTO ontol_scene_dictionary (id, scene_id, name, code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
+            (dict_id, scene_id, body.name, body.code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         return rows[0]
@@ -2295,12 +2295,12 @@ async def delete_dict(dict_id: str, soft: bool = True):
 
 class DictTypeCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="UUID")
-    dictionary_type_name: str = Field(..., max_length=200, description="分类名称")
+    name: str = Field(..., max_length=200, description="分类名称")
     dictionary_description: Optional[str] = Field(None, max_length=500)
     is_system: str = Field(default="0", max_length=1, description="是否系统预设")
 
 class DictTypeUpdate(BaseModel):
-    dictionary_type_name: Optional[str] = Field(None, max_length=200)
+    name: Optional[str] = Field(None, max_length=200)
     dictionary_description: Optional[str] = Field(None, max_length=500)
     delete_flag: Optional[str] = Field(None, max_length=2)
 
@@ -2337,8 +2337,8 @@ async def create_dict_type(body: DictTypeCreate):
     try:
         tid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
         await _execute_scene(
-            "INSERT INTO ontol_dictionary_type (id, dictionary_type_name, dictionary_description, is_system) VALUES (?,?,?,?)",
-            (tid, body.dictionary_type_name, body.dictionary_description or "", body.is_system),
+            "INSERT INTO ontol_dictionary_type (id, name, dictionary_description, is_system) VALUES (?,?,?,?)",
+            (tid, body.name, body.dictionary_description or "", body.is_system),
         )
         rows = await _query_scene("SELECT * FROM ontol_dictionary_type WHERE id=?", (tid,))
         return rows[0]
@@ -2387,12 +2387,12 @@ async def delete_dict_type(type_id: str, soft: bool = True):
 
 class LLMTypeConfigCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="UUID")
-    llm_type_name: str = Field(..., max_length=200, description="类型名称")
+    name: str = Field(..., max_length=200, description="类型名称")
     llm_description: Optional[str] = Field(None, max_length=500)
     is_system: str = Field(default="0", max_length=1, description="是否系统预设 0自定义/1系统")
 
 class LLMTypeConfigUpdate(BaseModel):
-    llm_type_name: Optional[str] = Field(None, max_length=200)
+    name: Optional[str] = Field(None, max_length=200)
     llm_description: Optional[str] = Field(None, max_length=500)
     delete_flag: Optional[str] = Field(None, max_length=2)
 
@@ -2429,8 +2429,8 @@ async def create_llm_type_config(body: LLMTypeConfigCreate):
     try:
         cid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
         await _execute_scene(
-            "INSERT INTO ontol_llm_type_config (id, llm_type_name, llm_description, is_system) VALUES (?,?,?,?)",
-            (cid, body.llm_type_name, body.llm_description or "", body.is_system),
+            "INSERT INTO ontol_llm_type_config (id, name, llm_description, is_system) VALUES (?,?,?,?)",
+            (cid, body.name, body.llm_description or "", body.is_system),
         )
         rows = await _query_scene("SELECT * FROM ontol_llm_type_config WHERE id=?", (cid,))
         return rows[0]
@@ -2480,7 +2480,7 @@ async def delete_llm_type_config(config_id: str, soft: bool = True):
 class LLMConfigCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="UUID")
     llm_type_config_id: Optional[str] = Field(None, max_length=32, description="所属类型配置ID")
-    llm_name: str = Field(..., max_length=200, description="显示名")
+    name: str = Field(..., max_length=200, description="显示名")
     llm_model: Optional[str] = Field(None, max_length=200, description="API模型名（如 deepseek-v4-pro）")
     llm_url: Optional[str] = Field(None, max_length=500, description="调用地址")
     llm_key: Optional[str] = Field(None, max_length=500, description="调用Key")
@@ -2488,7 +2488,7 @@ class LLMConfigCreate(BaseModel):
 
 class LLMConfigUpdate(BaseModel):
     llm_type_config_id: Optional[str] = Field(None, max_length=32)
-    llm_name: Optional[str] = Field(None, max_length=200)
+    name: Optional[str] = Field(None, max_length=200)
     llm_model: Optional[str] = Field(None, max_length=200)
     llm_url: Optional[str] = Field(None, max_length=500)
     llm_key: Optional[str] = Field(None, max_length=500)
@@ -2541,8 +2541,8 @@ async def create_llm_config(body: LLMConfigCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Config ID '{cfg_id}' already exists")
         await _execute_scene(
-            "INSERT INTO ontol_llm_config (id, llm_type_config_id, llm_name, llm_model, llm_url, llm_key, llm_description) VALUES (?,?,?,?,?,?,?)",
-            (cfg_id, body.llm_type_config_id or None, body.llm_name, body.llm_model or None, body.llm_url or "", body.llm_key or "", body.llm_description or ""),
+            "INSERT INTO ontol_llm_config (id, llm_type_config_id, name, llm_model, llm_url, llm_key, llm_description) VALUES (?,?,?,?,?,?,?)",
+            (cfg_id, body.llm_type_config_id or None, body.name, body.llm_model or None, body.llm_url or "", body.llm_key or "", body.llm_description or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_llm_config WHERE id=?", (cfg_id,))
         return rows[0]

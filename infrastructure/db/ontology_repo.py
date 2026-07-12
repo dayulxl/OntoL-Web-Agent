@@ -57,7 +57,7 @@ class OntologyRepo:
                         INNER JOIN tree t ON m.ontol_parent_id = t.id
                         WHERE m.delete_flag = '0'
                     )
-                    SELECT * FROM tree ORDER BY depth, ontol_model_type, ontol_name
+                    SELECT * FROM tree ORDER BY depth, ontol_model_type, name
                     """,
                     root_id,
                 )
@@ -74,14 +74,14 @@ class OntologyRepo:
                         INNER JOIN tree t ON m.ontol_parent_id = t.id
                         WHERE m.delete_flag = '0'
                     )
-                    SELECT * FROM tree ORDER BY depth, ontol_model_type, ontol_name
+                    SELECT * FROM tree ORDER BY depth, ontol_model_type, name
                     """
                 )
             return [dict(r) for r in rows]
 
     async def get_children(self, parent_id: str) -> list[dict]:
         """获取直接子节点。"""
-        return await self.model.list(where={"ontol_parent_id": parent_id}, order_by="ontol_model_type, ontol_name")
+        return await self.model.list(where={"ontol_parent_id": parent_id}, order_by="ontol_model_type, name")
 
     # ==================================================================
     # 模型 + 属性 复合查询
@@ -92,7 +92,7 @@ class OntologyRepo:
         model = await self.model.get_by_id(model_id)
         if not model:
             return None
-        attrs = await self.attr.list(where={"ontol_model_id": model_id}, order_by="attr_is_system DESC, attr_order, attr_code")
+        attrs = await self.attr.list(where={"ontol_model_id": model_id}, order_by="attr_is_system DESC, attr_order, code")
         model["attributes"] = attrs
         return model
 
@@ -111,7 +111,7 @@ class OntologyRepo:
                 f"""
                 SELECT * FROM ontol_model_attr
                 WHERE ontol_model_id IN ({placeholders}) AND delete_flag = '0'
-                ORDER BY attr_is_system DESC, attr_order, attr_code
+                ORDER BY attr_is_system DESC, attr_order, code
                 """,
                 *model_ids,
             )
@@ -129,7 +129,7 @@ class OntologyRepo:
         where = {"ontol_model_id": model_id}
         if is_system:
             where["attr_is_system"] = is_system
-        return await self.attr.list(where=where, order_by="attr_is_system DESC, attr_order, attr_code")
+        return await self.attr.list(where=where, order_by="attr_is_system DESC, attr_order, code")
 
     # ==================================================================
     # 搜索
@@ -139,7 +139,7 @@ class OntologyRepo:
         """按名称/描述模糊搜索本体模型。"""
         return await self.model.search(
             keyword,
-            columns=["ontol_name", "ontol_model_desc"],
+            columns=["name", "ontol_model_desc"],
             limit=limit,
         )
 

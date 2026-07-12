@@ -129,7 +129,7 @@ function renderTypeTree(){
         var isActive = activeType && activeType.id === t.id;
         var cnt = dictCountMap[t.id] || 0;
         h += '<div class="dict-tree-item' + (isActive?' active':'') + '" onclick="selectType(\x27' + t.id + '\x27)">' +
-            '<span class="label">' + esc(t.dictionary_type_name) + '</span>' +
+            '<span class="label">' + esc(t.name) + '</span>' +
             (cnt > 0 ? '<span class="badge count">' + cnt + '</span>' : '') +
             (isSys ? '<span class="badge sys">预设</span>' : '') +
             '<span class="btn-group" onclick="event.stopPropagation()">' +
@@ -156,7 +156,7 @@ async function loadDicts(typeId){
         // 拉取所有带该 type_id 的词条
         var all = await apiGet(API_DICT);
         var dicts = all.filter(function(d){ return d.dictionary_type_id === typeId; });
-        var title = activeType ? esc(activeType.dictionary_type_name) : typeId;
+        var title = activeType ? esc(activeType.name) : typeId;
         hdr.innerHTML = '<h2>📖 ' + title + ' <span style="font-size:0.72rem;color:var(--text-dim);">(' + dicts.length + ' 条)</span></h2>' +
             '<button class="btn btn-accent btn-sm" onclick="showDictForm()">＋ 新建词条</button>';
 
@@ -165,8 +165,8 @@ async function loadDicts(typeId){
         body.innerHTML = '<table class="dict-table"><thead><tr><th>编码</th><th>词条名称</th><th>内容</th><th>时间</th><th style="width:60px;">操作</th></tr></thead><tbody>' +
             dicts.map(function(d){
                 return '<tr>' +
-                    '<td><code>' + esc(d.dictionary_code||'—') + '</code></td>' +
-                    '<td>' + esc(d.dictionary_name) + '</td>' +
+                    '<td><code>' + esc(d.code||'—') + '</code></td>' +
+                    '<td>' + esc(d.name) + '</td>' +
                     '<td class="content-cell" title="' + esc(d.dictionary_content||'') + '">' + esc(d.dictionary_content||'—') + '</td>' +
                     '<td>' + (d.create_time||'').substring(0,10) + '</td>' +
                     '<td><span class="btn-group">' +
@@ -188,7 +188,7 @@ function showTypeForm(typeId){
     document.getElementById('modalBox').innerHTML =
         '<h3>' + (isEdit ? '编辑词条分类' : '新建词条分类') + '</h3>' +
         '<label>分类名称 <span style="color:#ef4444;">*</span></label>' +
-        '<input id="ft-name" value="' + esc(ex.dictionary_type_name||'') + '" placeholder="分类名称" maxlength="200" />' +
+        '<input id="ft-name" value="' + esc(ex.name||'') + '" placeholder="分类名称" maxlength="200" />' +
         '<label>描述</label>' +
         '<input id="ft-desc" value="' + esc(ex.dictionary_description||'') + '" placeholder="分类描述" maxlength="500" />' +
         '<div class="btn-row">' +
@@ -202,7 +202,7 @@ async function addType(){
     var n = document.getElementById('ft-name').value.trim();
     if(!n){ alert('请输入分类名称'); return; }
     try {
-        await apiPost(API_DICT_TYPE, {id:'', dictionary_type_name:n, dictionary_description:document.getElementById('ft-desc').value.trim()||null, is_system:'0'});
+        await apiPost(API_DICT_TYPE, {id:'', name:n, dictionary_description:document.getElementById('ft-desc').value.trim()||null, is_system:'0'});
         closeModal();
         typeData = await apiGet(API_DICT_TYPE);
         renderTypeTree();
@@ -213,7 +213,7 @@ async function updType(id){
     var n = document.getElementById('ft-name').value.trim();
     if(!n){ alert('请输入分类名称'); return; }
     try {
-        await apiPut(API_DICT_TYPE+'/'+id, {dictionary_type_name:n, dictionary_description:document.getElementById('ft-desc').value.trim()||null});
+        await apiPut(API_DICT_TYPE+'/'+id, {name:n, dictionary_description:document.getElementById('ft-desc').value.trim()||null});
         closeModal();
         typeData = await apiGet(API_DICT_TYPE);
         renderTypeTree();
@@ -236,13 +236,13 @@ function showDictForm(dictId){
     (async function(){
         var ex = {};
         if(isEdit){ try { ex = await apiGet(API_DICT+'/'+dictId); } catch(e){} }
-        var typeOptions = typeData.map(function(t){ return '<option value="'+t.id+'"'+(ex.dictionary_type_id===t.id||(!isEdit&&activeType&&activeType.id===t.id)?' selected':'')+'>'+esc(t.dictionary_type_name)+'</option>'; }).join('');
+        var typeOptions = typeData.map(function(t){ return '<option value="'+t.id+'"'+(ex.dictionary_type_id===t.id||(!isEdit&&activeType&&activeType.id===t.id)?' selected':'')+'>'+esc(t.name)+'</option>'; }).join('');
         document.getElementById('modalBox').innerHTML =
             '<h3>' + (isEdit ? '编辑词条' : '新建词条') + '</h3>' +
             '<label>词条编码</label>' +
-            '<input id="f-code" value="' + esc(ex.dictionary_code||'') + '" placeholder="词条编码（唯一标识）" maxlength="100" />' +
+            '<input id="f-code" value="' + esc(ex.code||'') + '" placeholder="词条编码（唯一标识）" maxlength="100" />' +
             '<label>词条名称 <span style="color:#ef4444;">*</span></label>' +
-            '<input id="f-name" value="' + esc(ex.dictionary_name||'') + '" placeholder="词条名称" maxlength="200" />' +
+            '<input id="f-name" value="' + esc(ex.name||'') + '" placeholder="词条名称" maxlength="200" />' +
             '<label>所属分类</label>' +
             '<select id="f-typeid"><option value="">— 无 —</option>' + typeOptions + '</select>' +
             '<label>词条内容</label>' +
@@ -260,8 +260,8 @@ async function addDict(){
     if(!name){ alert('请输入词条名称'); return; }
     try {
         await apiPost(API_DICT, {
-            id: '', scene_id: 'SCENE_DEFAULT', dictionary_name: name,
-            dictionary_code: document.getElementById('f-code').value.trim() || null,
+            id: '', scene_id: 'SCENE_DEFAULT', name: name,
+            code: document.getElementById('f-code').value.trim() || null,
             dictionary_type_id: document.getElementById('f-typeid').value || null,
             dictionary_content: document.getElementById('f-content').value.trim() || ''
         });
@@ -275,8 +275,8 @@ async function updDict(dictId){
     if(!name){ alert('请输入词条名称'); return; }
     try {
         await apiPut(API_DICT+'/'+dictId, {
-            dictionary_name: name,
-            dictionary_code: document.getElementById('f-code').value.trim() || null,
+            name: name,
+            code: document.getElementById('f-code').value.trim() || null,
             dictionary_type_id: document.getElementById('f-typeid').value || null,
             dictionary_content: document.getElementById('f-content').value.trim() || ''
         });
