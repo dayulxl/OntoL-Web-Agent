@@ -266,7 +266,7 @@ class ReasoningEngine:
             yield await self._emit(ReasoningEvent(step=4, event="log",
                 message=f"  → 继承 {len(self.ancestors)} 个父类型属性"))
 
-            # ── 置信度传播（有 confidence 属性就乘，没有就维持）──
+            # ── 置信度传播（有就乘，没有就维持）──
             node_conf = props.get("confidence")
             if node_conf is not None:
                 try:
@@ -278,27 +278,42 @@ class ReasoningEngine:
                     message=f"  ⛔ 置信度 {confidence:.2f} 低于阈值，阻断"))
                 break
 
-            # ── hasPrecondition（有就判断，没有就跳过）──
+            # ═══════════════════════════════════════════════════════
+            # ① 触发前约束 hasPrecondition — 最先执行，false 时整个节点停止
+            # ═══════════════════════════════════════════════════════
             pre = props.get("hasPrecondition")
-            if pre is not None:
+            precondition_passed = True
+            if pre is not None and str(pre).strip():
                 verdict = check_precondition(props, "hasPrecondition")
-                yield await self._emit(ReasoningEvent(step=4, event="log",
-                    message=f"  hasPrecondition: {pre} {'✅ 通过' if verdict == RuleVerdict.PASS else '❌ 阻断'}"))
+                if verdict == RuleVerdict.BLOCK:
+                    precondition_passed = False
+                    yield await self._emit(ReasoningEvent(step=4, event="log",
+                        message=f"  hasPrecondition: {str(pre)[:80]} ❌ 阻断 → 本节点所有函数停止"))
+                    continue  # 直接跳到下一个节点
 
-            # ── hasEffect（有就输出，没有就跳过）──
+            # ═══════════════════════════════════════════════════════
+            # ② 效果 hasEffect — precondition 通过才执行
+            # ═══════════════════════════════════════════════════════
             eff = props.get("hasEffect")
-            if eff:
+            if eff and str(eff).strip():
                 yield await self._emit(ReasoningEvent(step=4, event="log",
-                    message=f"  hasEffect: {eff} → {classify_effect(str(eff))} 引擎"))
+                    message=f"  hasEffect: {str(eff)[:100]} → {classify_effect(str(eff))} 引擎"))
 
-            # ── hasCost / hasDuration / hasPriority（有就输出）──
-            for k, label in [("hasCost", "hasCost"), ("hasDuration", "hasDuration(s)"),
-                             ("hasPriority", "hasPriority")]:
+            # ═══════════════════════════════════════════════════════
+            # ③ 消耗 hasCost — precondition 通过才执行，最多一个执行语言
+            # ═══════════════════════════════════════════════════════
+            cost_raw = props.get("hasCost")
+            if cost_raw is not None and str(cost_raw).strip():
+                cost_str = str(cost_raw).strip()
+                yield await self._emit(ReasoningEvent(step=4, event="log",
+                    message=f"  hasCost: {cost_str[:200]}"))
+
+            # ── 其他可选字段：有就输出 ──
+            for k, label in [("hasDuration", "hasDuration(s)"), ("hasPriority", "hasPriority(等级,10级最高)")]:
                 v = props.get(k)
                 if v is not None:
                     yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  {label}: {v}"))
 
-            # ── composedOf（有就输出）──
             comp = props.get("composedOf")
             if comp:
                 parts = [p.strip() for p in str(comp).split(";") if p.strip()]
@@ -306,7 +321,7 @@ class ReasoningEngine:
                     message=f"  composedOf: {parts}（递归执行）"))
 
             # ═══════════════════════════════════════════════════
-            # 沿 actionType=inference 边走 → 读边上的 9 个标准属性（有就判断，没有就跳过）
+            # 沿 actionType=inference 边走 → 读边上标准属性
             # ═══════════════════════════════════════════════════
             rels = await get_relationships(orig_id, direction="out")
             for r in rels:
