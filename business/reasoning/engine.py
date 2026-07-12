@@ -26,6 +26,7 @@ from business.reasoning.graph_ops import (
     merge_inherited_props,
     update_node_props,
     get_outgoing_by_rel_type,
+    get_outgoing_inference_edges,
 )
 from business.transformation.owl2_converter import climb_subclass_chain
 from business.reasoning.rules import (
@@ -225,109 +226,121 @@ class ReasoningEngine:
     # ================================================================
 
     async def _walk_inference_chain(self, node_id: int, result: list, visited: set) -> None:
-        """沿 actionType=inference 递归下探（BFS 顺序）。"""
+        """沿 actionType=inference 边递归下探（BFS 顺序）。"""
         if node_id in visited:
             return
         visited.add(node_id)
-        records = await get_outgoing_by_rel_type(node_id, "inference")
+        records = await get_outgoing_inference_edges(node_id)
         for r in records:
             ds = {"id": r["id"], "labels": r["labels"], "props": r["props"]}
             result.append(ds)
             await self._walk_inference_chain(r["id"], result, visited)
 
+    # ================================================================
+    # Step 4 — 逐节点推理（节点属性 → 推理边属性）
+    # ================================================================
+
     async def _step4_reason(self, seed_node_id: int) -> None:
-        """按推理队列顺序逐节点执行。"""
-        # 构建推理队列：种子 → 下游1 → 下游2 → ...
+        """遍历推理队列，逐节点读属性 + 沿 inference 边读边属性，完整叙述。"""
+        # 构建推理队列
         queue = [seed_node_id]
-        downstream_step4 = []
-        visited_s4 = set()
-        await self._walk_inference_chain(seed_node_id, downstream_step4, visited_s4)
-        queue.extend(d["id"] for d in downstream_step4)
+        ds = []
+        await self._walk_inference_chain(seed_node_id, ds, set())
+        queue.extend(d["id"] for d in ds)
 
         confidence = 1.0
         step_num = 0
+        seen = set()
 
         for orig_id in queue:
-            if orig_id not in self.cm:
+            if orig_id not in self.cm or orig_id in seen:
                 continue
             step_num += 1
-            node_tuple = self.cm[orig_id]
-            if node_tuple is None:
-                continue
-            orig_node, copy_id = node_tuple
-            props = orig_node.get("props", {})
+            seen.add(orig_id)
+            orig_node, copy_id = self.cm[orig_id]
+            props = orig_node.get("props", {}) or {}
             code = props.get("code", str(orig_id))
 
-            yield await self._emit(ReasoningEvent(
-                step=4, event="log",
+            yield await self._emit(ReasoningEvent(step=4, event="log",
                 message=f"【第{step_num}步】{code} 原ID={orig_id} 副ID={copy_id}"))
-            yield await self._emit(ReasoningEvent(
-                step=4, event="log",
+            yield await self._emit(ReasoningEvent(step=4, event="log",
                 message=f"  → 继承 {len(self.ancestors)} 个父类型属性"))
 
-            # ---- 置信度传播 ----
-            confidence, blocked = propagate_confidence(confidence, props, self.confidence_threshold)
-            if blocked:
-                yield await self._emit(ReasoningEvent(
-                    step=4, event="log",
-                    message=f"  ⛔ 置信度 {confidence:.2f} 低于阈值 {self.confidence_threshold}，阻断"))
+            # ── 置信度传播（有 confidence 属性就乘，没有就维持）──
+            node_conf = props.get("confidence")
+            if node_conf is not None:
+                try:
+                    confidence *= float(node_conf)
+                except (ValueError, TypeError):
+                    pass
+            if confidence < self.confidence_threshold:
+                yield await self._emit(ReasoningEvent(step=4, event="log",
+                    message=f"  ⛔ 置信度 {confidence:.2f} 低于阈值，阻断"))
                 break
 
-            # ---- 前置条件 ----
-            precond_verdict = check_precondition(props, "hasPrecondition")
-            precond_raw = props.get("hasPrecondition", "(无)")
-            if precond_verdict == RuleVerdict.PASS:
-                yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  hasPrecondition: {precond_raw} ✅ 通过"))
-            elif precond_verdict == RuleVerdict.BLOCK:
-                yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  hasPrecondition: {precond_raw} ❌ 阻断"))
-                # 强校验则停止，弱校验继续
-                for rule in self.registry.get_enabled():
-                    if rule.validation_level == ValidationLevel.STRONG:
-                        continue  # 不继续下游
-                continue
-            else:
-                yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  hasPrecondition: (无) → 跳过"))
-
-            # ---- 效果 ----
-            effect_val = props.get("hasEffect", "")
-            if effect_val:
-                effect_type = classify_effect(str(effect_val))
+            # ── hasPrecondition（有就判断，没有就跳过）──
+            pre = props.get("hasPrecondition")
+            if pre is not None:
+                verdict = check_precondition(props, "hasPrecondition")
                 yield await self._emit(ReasoningEvent(step=4, event="log",
-                    message=f"  hasEffect: {effect_val} → {effect_type} 引擎"))
-                if effect_type == "swrl":
-                    parsed = parse_swrl_effect(str(effect_val))
-                    yield await self._emit(ReasoningEvent(step=4, event="log",
-                        message=f"  ✅ 触发成功: {parsed}"))
-                elif effect_type == "rule":
-                    direction = parse_rule_direction(str(effect_val))
-                    yield await self._emit(ReasoningEvent(step=4, event="log",
-                        message=f"  推理方向: {direction}"))
+                    message=f"  hasPrecondition: {pre} {'✅ 通过' if verdict == RuleVerdict.PASS else '❌ 阻断'}"))
 
-            # ---- 成本/时长/优先级 ----
-            cost = props.get("hasCost")
-            duration = props.get("hasDuration")
-            priority = props.get("hasPriority")
-            if cost is not None:
-                yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  hasCost: {cost}"))
-            if duration is not None:
-                yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  hasDuration: {duration}s"))
-            if priority is not None:
-                yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  hasPriority: {priority}（等级{priority}，10级最高）"))
+            # ── hasEffect（有就输出，没有就跳过）──
+            eff = props.get("hasEffect")
+            if eff:
+                yield await self._emit(ReasoningEvent(step=4, event="log",
+                    message=f"  hasEffect: {eff} → {classify_effect(str(eff))} 引擎"))
 
-            # ---- 组合执行 ----
-            composed = props.get("composedOf", "")
-            if composed:
-                parts = [p.strip() for p in str(composed).split(";") if p.strip()]
+            # ── hasCost / hasDuration / hasPriority（有就输出）──
+            for k, label in [("hasCost", "hasCost"), ("hasDuration", "hasDuration(s)"),
+                             ("hasPriority", "hasPriority")]:
+                v = props.get(k)
+                if v is not None:
+                    yield await self._emit(ReasoningEvent(step=4, event="log", message=f"  {label}: {v}"))
+
+            # ── composedOf（有就输出）──
+            comp = props.get("composedOf")
+            if comp:
+                parts = [p.strip() for p in str(comp).split(";") if p.strip()]
                 yield await self._emit(ReasoningEvent(step=4, event="log",
                     message=f"  composedOf: {parts}（递归执行）"))
 
-            # ---- 推理跳转 ----
+            # ═══════════════════════════════════════════════════
+            # 沿 actionType=inference 边走 → 读边上的 9 个标准属性（有就判断，没有就跳过）
+            # ═══════════════════════════════════════════════════
             rels = await get_relationships(orig_id, direction="out")
-            inference_targets = [
-                r for r in rels
-                if r["rel_props"].get("actionType") == "inference"
-            ]
-            for tgt in inference_targets:
-                tgt_code = tgt["target_props"].get("code", str(tgt["target_id"]))
+            for r in rels:
+                eprops = r.get("rel_props", {}) or {}
+                etype = r.get("rel_type", "")
+
+                # 判断是否为推理边：边类型含 "inference" OR actionType 属性 = "inference"
+                is_inf = "inference" in str(etype).lower() or str(eprops.get("actionType", "")).lower() == "inference"
+                if not is_inf:
+                    continue
+
+                tgt_code = r["target_props"].get("code", str(r["target_id"]))
                 yield await self._emit(ReasoningEvent(step=4, event="log",
-                    message=f"  → 【{effect_val}】→ 下游节点 {tgt_code}"))
+                    message=f"  → actionType=inference → 下游: {tgt_code}"))
+
+                # 9 个标准边属性 — 有就输出并判断，没有就跳过（宽容执行）
+                for ek, elabel, eicon in [
+                    ("required",        "required(阻断控制)",    "🛑"),
+                    ("validationType",  "validationType(规则级别)", "⚖️"),
+                    ("ruleId",          "ruleId(规则锚点)",      "📎"),
+                    ("func",            "func(执行指令)",        "⚙️"),
+                    ("id",              "id(数据锚点)",          "📍"),
+                    ("msg",             "msg(作用说明)",         "📝"),
+                    ("synonym",         "synonym(同义词)",       "🔄"),
+                    ("queryVariant",    "queryVariant(错意词)",   "🔍"),
+                ]:
+                    ev = eprops.get(ek)
+                    if ev is not None and str(ev).strip():
+                        yield await self._emit(ReasoningEvent(step=4, event="log",
+                            message=f"    {eicon} {elabel}: {ev}"))
+
+                # required=true + validationType=Strong → 阻断
+                req = eprops.get("required")
+                vtype = str(eprops.get("validationType", "")).strip()
+                if str(req).lower() in ("true", "1") and vtype == "Strong":
+                    yield await self._emit(ReasoningEvent(step=4, event="log",
+                        message=f"    🛑 Strong 强校验阻断"))

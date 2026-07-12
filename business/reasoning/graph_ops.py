@@ -66,16 +66,32 @@ async def get_relationships(node_id: int, direction: str = "both") -> list[dict]
         ]
 
 
-async def get_outgoing_by_rel_type(node_id: int, rel_type: str) -> list[dict]:
-    """查指定关系类型 + actionType 的出边目标节点（用于推理链下探）。"""
+async def get_outgoing_inference_edges(node_id: int) -> list[dict]:
+    """查 actionType=inference 的出边 — 兼容边类型名或属性两种写法。"""
     driver = await get_driver()
     async with driver.session() as session:
         result = await session.run(
             "MATCH (n)-[r]->(m) WHERE id(n) = $id "
-            "AND (type(r) = $rel OR r.actionType = $action) "
+            "AND (type(r) CONTAINS 'inference' OR r.actionType = 'inference') "
             "RETURN id(m) AS id, labels(m) AS labels, properties(m) AS props, "
             "type(r) AS rel_type, properties(r) AS rel_props",
-            id=node_id, rel=rel_type, action="inference",
+            id=node_id,
+        )
+        return [{"id": r["id"], "labels": r["labels"], "props": dict(r["props"]),
+                 "rel_type": r["rel_type"], "rel_props": dict(r["rel_props"])}
+                for r in await result.data()]
+
+
+async def get_outgoing_by_rel_type(node_id: int, rel_type: str) -> list[dict]:
+    """查指定关系类型名或 actionType 属性的出边（OWL2 链爬取用）。"""
+    driver = await get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (n)-[r]->(m) WHERE id(n) = $id "
+            "AND (type(r) = $rel OR r.actionType = $rel) "
+            "RETURN id(m) AS id, labels(m) AS labels, properties(m) AS props, "
+            "type(r) AS rel_type, properties(r) AS rel_props",
+            id=node_id, rel=rel_type,
         )
         return [{"id": r["id"], "labels": r["labels"], "props": dict(r["props"]),
                  "rel_type": r["rel_type"], "rel_props": dict(r["rel_props"])}
