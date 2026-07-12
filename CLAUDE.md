@@ -43,51 +43,71 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 ## 项目结构
 
 ```
-├── gateway/          # FastAPI 网关 (app.py 入口, routes/, middleware/)
-│   └── routes/
-│       ├── chat_routes.py           # 对话 SSE API + 动态提示词 (prompt_id)
-│       ├── ontology_routes.py       # 图 DB CRUD + 场景管理 + 提示词 CRUD + 文件导入
-│       ├── langgraph_routes.py      # LangGraph 工作流 API
-│       ├── datamanage_routes.py     # 数据源/动态API/内置代码/日志 管理
-│       ├── reasoning_routes.py      # 🆕 图推理机 SSE 流式接口 (触发推理 + 推送日志)
-│       └── page_routes.py           # Jinja2 页面渲染 (18 个页面)
-├── orchestrator/     # 业务流程编排
-├── business/         # 业务逻辑层
-│   ├── route_planning/              # 航路规划域
-│   ├── strike_decision/             # 打击决策域
-│   ├── reasoning/                   # 🆕 图推理机业务域
-│   │   ├── engine.py                #   核心：推理引擎主循环 (遍历图 → 匹配规则 → 写回)
-│   │   ├── rules.py                 #   核心：规则定义 (纯 Python 类/字典，不走 SWRL)
-│   │   └── graph_ops.py             #   核心：底层图操作 (查邻居、改属性、建边)
-│   └── transformation/              # 🆕 转换层：本体语言 → Cypher
-│       ├── rdfs_converter.py        #   ① RDFS (rdfs: 前缀)
-│       ├── owl2_converter.py        #   ② OWL2 DL (owl2: 前缀)
-│       ├── swrl_converter.py        #   ③ SWRL (swrl: 前缀)
-│       ├── shacl_converter.py       #   ④ SHACL (sh: 前缀)
-│       ├── rule_converter.py        #   ⑤ 规则设定 (rule: 前缀，前链/后链)
-│       ├── func_converter.py        #   ⑥ 动态函数 (func: 前缀，JSON 调用)
-│       └── jsonpath_converter.py    #   ⑦ JSONPath ($. 前缀，RFC 9535)
-├── capabilities/     # 能力层 (LLM 调用、工具等)
-│   ├── agents/chat_agent.py         # ChatAgent（ReAct + 7工具 + 动态提示词）
-│   ├── memory/graph_memory.py       # Memgraph 图记忆（标准 Cypher 兼容，增删属性）
-│   └── graph_reasoner/              # 图推理引擎 — 推理机协调者 + 前端服务层
-├── common/           # 共享设施 (config/settings.py, utils/logger.py)
-├── infrastructure/   # 基础设施
-│   ├── db/neo4j.py                  # Memgraph 驱动（memgraph:// → bolt:// 自动转换）
-│   ├── db/sqlite_db.py              # SQLite 自动建表+种子
-│   └── db/ontol.db                  # 本体模型数据库（10 张表）
-├── webAPP/           # 前端资源
-│   ├── templates/                   # Jinja2 模板（16 个页面 + 组件）
-│   │   ├── pages/prompt_manager.html  # 🆕 场景管理（场景+提示词）
-│   │   ├── reasoning_ui.html          # 🆕 推理机控制台（选节点 → 配规则 → 看日志）
-│   │   └── components/navbar.html     # 导航栏（12 个链接）
-│   ├── static/css/                  # 全局样式
-│   └── static/js/
-│       └── graph-layout.js           # 有向图布局引擎（source左target右，纯技术函数）
-├── tests/            # 测试 (pytest, asyncio)
-├── deployments/      # Docker & K8s 部署配置
-└── scripts/          # 运维脚本
+├── gateway/                # FastAPI 网关 (app.py 入口)
+│   ├── routes/             #   路由层
+│   │   ├── chat_routes.py          # 对话 SSE API + 动态提示词 (prompt_id)
+│   │   ├── ontology_routes.py      # 图 DB CRUD + 场景/提示词 CRUD + 文件导入
+│   │   ├── langgraph_routes.py     # LangGraph 工作流 API
+│   │   ├── datamanage_routes.py    # 数据源/动态API/内置代码/日志 管理
+│   │   ├── reasoning_routes.py     # 🆕 图推理机 SSE 流式接口
+│   │   └── page_routes.py          # Jinja2 页面渲染 (12 个活跃页面)
+│   ├── middleware/          #   中间件 (auth / logging / rate_limiter)
+│   └── templates/          #   [遗留] Jinja2 模板 (14 个页面，未使用，待清理)
+├── orchestrator/           # 业务流程编排
+├── business/               # 业务逻辑层
+│   ├── reasoning/                  # 🆕 图推理机业务域
+│   │   ├── engine.py               #   核心：推理引擎主循环 (遍历→匹配→写回)
+│   │   ├── rules.py                #   核心：规则定义 (纯 Python 类/字典)
+│   │   └── graph_ops.py            #   核心：底层图操作 (查邻居、改属性、建边)
+│   ├── transformation/             # 🆕 转换层：本体语言 → Cypher
+│   │   ├── rdfs_converter.py       #   ① RDFS (rdfs: 前缀)
+│   │   ├── owl2_converter.py       #   ② OWL2 DL (owl2: 前缀)
+│   │   ├── swrl_converter.py       #   ③ SWRL (swrl: 前缀)
+│   │   ├── shacl_converter.py      #   ④ SHACL (sh: 前缀)
+│   │   ├── rule_converter.py       #   ⑤ 规则设定 (rule: 前缀)
+│   │   ├── func_converter.py       #   ⑥ 动态函数 (func: 前缀)
+│   │   └── jsonpath_converter.py   #   ⑦ JSONPath ($. 前缀, RFC 9535)
+│   ├── route_planning/             # 航路规划域 (graph / state / nodes / agent)
+│   └── strike_decision/            # 打击决策域 (graph / state / nodes / agent)
+├── capabilities/           # 能力层
+│   ├── agents/chat_agent.py        # ChatAgent (ReAct + 7工具 + 动态提示词)
+│   ├── memory/graph_memory.py      # Memgraph 图记忆 (Cypher 兼容)
+│   ├── graph_reasoner/             # 图推理引擎
+│   │   ├── core/                   #   推理核心
+│   │   ├── actions/                #   推理动作
+│   │   ├── translators/            #   本体查询翻译器
+│   │   └── versioning/             #   版本管理
+│   ├── tools/                      # 工具集 (knowledge_graph / registry)
+│   ├── models/                     # 模型配置
+│   ├── prompts/                    # 提示词 (agents / chains)
+│   └── chains/                     # 链式调用
+├── common/                 # 共享设施
+│   ├── config/settings.py          # Pydantic Settings (.env)
+│   ├── contracts/state_schema.py   # 状态基类契约
+│   ├── exceptions/base.py          # 统一异常定义
+│   └── utils/logger.py             # structlog 结构化日志
+├── infrastructure/         # 基础设施
+│   └── db/
+│       ├── neo4j.py                # Memgraph 驱动 (memgraph://→bolt://)
+│       ├── sqlite_db.py            # SQLite 自动建表+种子
+│       └── ontol.db                # 本体模型数据库 (12 张表)
+├── webAPP/                 # 前端资源 (运行时加载)
+│   ├── templates/                  # Jinja2 模板 (活跃)
+│   │   ├── pages/                  #   页面模板 (12 个)
+│   │   │   ├── reasoning_ui.html   #     🆕 推理机控制台
+│   │   │   ├── prompt_manager.html #     场景管理
+│   │   │   ├── chat.html           #     AI 对话
+│   │   │   ├── sandbox_wargame.html#     沙盘推演
+│   │   │   └── ...                 #     (共 12 页)
+│   │   └── components/navbar.html  #   导航栏组件
+│   └── static/
+│       └── js/graph-layout.js      # 有向图布局引擎
+├── tests/                  # 测试 (pytest, asyncio)
+├── deployments/            # Docker & K8s 部署配置
+└── scripts/                # 运维脚本
 ```
+
+> **注意**：`gateway/templates/` 为遗留目录（14 个旧模板），`page_routes.py` 实际加载 `webAPP/templates/`（12 个活跃模板）。两个目录的页面不完全重叠，部分旧页面（如 workflow、data_ingestion）仅存在于遗留目录，可能已不可用。
 
 ## 关键技术栈
 
@@ -184,7 +204,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
                          ├─ convert:    规则 DSL → Cypher (transformation/)
                          └─ writeback:  结果写回图节点/边
                               │
-                         SSE 推送实时日志 ──► reasoning_ui.html
+                         SSE 推送实时日志 ──► webAPP/templates/pages/reasoning_ui.html
 ```
 
 **架构分层**：
@@ -192,12 +212,12 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 层 | 模块 | 职责 |
 |----|------|------|
 | Gateway | `reasoning_routes.py` | 接收 HTTP 请求，参数校验，SSE 推流 |
-| UI | `reasoning_ui.html` | 选起点节点、配规则、看实时执行日志 |
+| UI | `webAPP/templates/pages/reasoning_ui.html` | 选起点节点、配规则、看实时执行日志 |
 | 业务 | `business/reasoning/` | 推理引擎核心，图遍历 + 规则匹配 + 写回 |
 | 转换 | `business/transformation/` | 7 种本体语言 → Cypher 查询语句 |
 | 基础设施 | `infrastructure/db/neo4j.py` | Memgraph 驱动，Bolt 协议连接池 |
 
-**推理机控制台页面** (`reasoning_ui.html`)：
+**推理机控制台页面** (`webAPP/templates/pages/reasoning_ui.html`)：
 - 起点节点选择器（按 code/name/ont_type 搜索）
 - 规则配置面板（勾选启用的规则、设置推理深度、置信度阈值）
 - SSE 实时日志流（节点遍历路径、规则命中/未命中、写回结果）
