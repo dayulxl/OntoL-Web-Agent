@@ -38,6 +38,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 推理机设置 | http://localhost:8000/reasoner-world | 外部推理引擎配置 |
 | 情报展示 | http://localhost:8000/intelligence | Entity 节点详情 |
 | 数据管理 | http://localhost:8000/datamanage | 数据源/API/内置接口/日志管理（卡片式） |
+| 推理机控制台 | http://localhost:8000/reasoning | 选起点节点、配推理规则、看实时执行日志 |
 
 ## 项目结构
 
@@ -48,9 +49,24 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │       ├── ontology_routes.py       # 图 DB CRUD + 场景管理 + 提示词 CRUD + 文件导入
 │       ├── langgraph_routes.py      # LangGraph 工作流 API
 │       ├── datamanage_routes.py     # 数据源/动态API/内置代码/日志 管理
-│       └── page_routes.py           # Jinja2 页面渲染 (17 个页面)
+│       ├── reasoning_routes.py      # 🆕 图推理机 SSE 流式接口 (触发推理 + 推送日志)
+│       └── page_routes.py           # Jinja2 页面渲染 (18 个页面)
 ├── orchestrator/     # 业务流程编排
 ├── business/         # 业务逻辑层
+│   ├── route_planning/              # 航路规划域
+│   ├── strike_decision/             # 打击决策域
+│   ├── reasoning/                   # 🆕 图推理机业务域
+│   │   ├── engine.py                #   核心：推理引擎主循环 (遍历图 → 匹配规则 → 写回)
+│   │   ├── rules.py                 #   核心：规则定义 (纯 Python 类/字典，不走 SWRL)
+│   │   └── graph_ops.py             #   核心：底层图操作 (查邻居、改属性、建边)
+│   └── transformation/              # 🆕 转换层：本体语言 → Cypher
+│       ├── rdfs_converter.py        #   ① RDFS (rdfs: 前缀)
+│       ├── owl2_converter.py        #   ② OWL2 DL (owl2: 前缀)
+│       ├── swrl_converter.py        #   ③ SWRL (swrl: 前缀)
+│       ├── shacl_converter.py       #   ④ SHACL (sh: 前缀)
+│       ├── rule_converter.py        #   ⑤ 规则设定 (rule: 前缀，前链/后链)
+│       ├── func_converter.py        #   ⑥ 动态函数 (func: 前缀，JSON 调用)
+│       └── jsonpath_converter.py    #   ⑦ JSONPath ($. 前缀，RFC 9535)
 ├── capabilities/     # 能力层 (LLM 调用、工具等)
 │   ├── agents/chat_agent.py         # ChatAgent（ReAct + 7工具 + 动态提示词）
 │   ├── memory/graph_memory.py       # Memgraph 图记忆（标准 Cypher 兼容，增删属性）
@@ -61,8 +77,9 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   ├── db/sqlite_db.py              # SQLite 自动建表+种子
 │   └── db/ontol.db                  # 本体模型数据库（10 张表）
 ├── webAPP/           # 前端资源
-│   ├── templates/                   # Jinja2 模板（15 个页面 + 组件）
+│   ├── templates/                   # Jinja2 模板（16 个页面 + 组件）
 │   │   ├── pages/prompt_manager.html  # 🆕 场景管理（场景+提示词）
+│   │   ├── reasoning_ui.html          # 🆕 推理机控制台（选节点 → 配规则 → 看日志）
 │   │   └── components/navbar.html     # 导航栏（12 个链接）
 │   ├── static/css/                  # 全局样式
 │   └── static/js/
@@ -152,6 +169,51 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 左侧标签切换：数据源 / 动态API / 内置接口 / 接口日志
 - 卡片式列表（响应式 grid） + 新增卡片入口
 - 点击卡片弹出居中编辑弹窗
+
+### 图推理机 (/reasoning) 🆕
+
+自研图推理引擎，直接在 Memgraph 图上执行规则推理，不依赖外部推理机服务。
+
+**核心流程**：选起点节点 → 配推理规则 → 引擎遍历图 → 规则匹配 → 写回结果
+
+```
+用户选节点 + 规则 ──► engine.py (主循环)
+                         │
+                         ├─ traversal:  沿边遍历邻居 (graph_ops.py)
+                         ├─ match:      节点属性匹配规则条件 (rules.py)
+                         ├─ convert:    规则 DSL → Cypher (transformation/)
+                         └─ writeback:  结果写回图节点/边
+                              │
+                         SSE 推送实时日志 ──► reasoning_ui.html
+```
+
+**架构分层**：
+
+| 层 | 模块 | 职责 |
+|----|------|------|
+| Gateway | `reasoning_routes.py` | 接收 HTTP 请求，参数校验，SSE 推流 |
+| UI | `reasoning_ui.html` | 选起点节点、配规则、看实时执行日志 |
+| 业务 | `business/reasoning/` | 推理引擎核心，图遍历 + 规则匹配 + 写回 |
+| 转换 | `business/transformation/` | 7 种本体语言 → Cypher 查询语句 |
+| 基础设施 | `infrastructure/db/neo4j.py` | Memgraph 驱动，Bolt 协议连接池 |
+
+**推理机控制台页面** (`reasoning_ui.html`)：
+- 起点节点选择器（按 code/name/ont_type 搜索）
+- 规则配置面板（勾选启用的规则、设置推理深度、置信度阈值）
+- SSE 实时日志流（节点遍历路径、规则命中/未命中、写回结果）
+- 推理结果展示（受影响的节点/边列表）
+
+**转换层** (`business/transformation/`)：将本体语言规则统一转为 Cypher，直接在 Memgraph 执行。支持 7 种本体前缀：
+
+| # | 语言 | 前缀 | 转换器 |
+|---|------|------|--------|
+| 1 | RDFS | `rdfs:` | `rdfs_converter.py` |
+| 2 | OWL2 DL | `owl2:` | `owl2_converter.py` |
+| 3 | SWRL | `swrl:` | `swrl_converter.py` |
+| 4 | SHACL | `sh:` | `shacl_converter.py` |
+| 5 | 规则设定 | `rule:` | `rule_converter.py` |
+| 6 | 动态函数 | `func:` | `func_converter.py` |
+| 7 | JSONPath | `$.` | `jsonpath_converter.py` |
 
 ### 推理机代理
 - `POST /api/v1/tools/call` → KG 推理机 (`KG_SERVER_URL`)，支持 `infer_forward`、`validate`、`check_rule`、`expand`
