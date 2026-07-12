@@ -239,7 +239,7 @@ function showDictForm(dictId){
         var typeOptions = typeData.map(function(t){ return '<option value="'+t.id+'"'+(ex.dictionary_type_id===t.id||(!isEdit&&activeType&&activeType.id===t.id)?' selected':'')+'>'+esc(t.name)+'</option>'; }).join('');
         document.getElementById('modalBox').innerHTML =
             '<h3>' + (isEdit ? '编辑词条' : '新建词条') + '</h3>' +
-            '<label>词条编码</label>' +
+            '<label>词条编码 <span style="color:#ef4444;">*</span></label>' +
             '<input id="f-code" value="' + esc(ex.code||'') + '" placeholder="词条编码（唯一标识）" maxlength="100" />' +
             '<label>词条名称 <span style="color:#ef4444;">*</span></label>' +
             '<input id="f-name" value="' + esc(ex.name||'') + '" placeholder="词条名称" maxlength="200" />' +
@@ -258,10 +258,12 @@ function showDictForm(dictId){
 async function addDict(){
     var name = document.getElementById('f-name').value.trim();
     if(!name){ alert('请输入词条名称'); return; }
+    var code = document.getElementById('f-code').value.trim();
+    if(!code){ alert('请输入词条编码'); return; }
     try {
         await apiPost(API_DICT, {
             id: '', scene_id: 'SCENE_DEFAULT', name: name,
-            code: document.getElementById('f-code').value.trim() || null,
+            code: code,
             dictionary_type_id: document.getElementById('f-typeid').value || null,
             dictionary_content: document.getElementById('f-content').value.trim() || ''
         });

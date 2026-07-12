@@ -240,3 +240,13 @@ async def prompt_manager_page(request: Request):
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),
     })
+
+
+@router.get("/function-manager", response_class=HTMLResponse)
+async def function_manager_page(request: Request):
+    ctx = request_context.get()
+    return _render("pages/function_manager.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })

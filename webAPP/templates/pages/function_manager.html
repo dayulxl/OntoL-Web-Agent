@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block title %}动态函数 — OntoL{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.func-layout { display: flex; height: calc(100vh - 60px); background: rgba(8,12,32,0.96); }
+
+.func-sidebar { width: 280px; min-width: 280px; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.func-sidebar-header { padding: 1rem 1rem 0.6rem; border-bottom: 1px solid rgba(0,212,255,0.08); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
+.func-sidebar-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin: 0; }
+.func-tree-wrap { flex: 1; overflow-y: auto; padding: 0.5rem 0; }
+.func-tree-item { display: flex; align-items: center; gap: 0.35rem; padding: 0.45rem 1rem; cursor: pointer; border-left: 3px solid transparent; font-size: 0.82rem; }
+.func-tree-item:hover { background: rgba(0,212,255,0.05); }
+.func-tree-item.active { border-left-color: var(--accent); background: rgba(0,212,255,0.08); }
+.func-tree-item .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.func-tree-item .badge { font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 3px; flex-shrink: 0; }
+.func-tree-item .badge.sys { background: rgba(239,68,68,0.1); color: #ef4444; }
+.func-tree-item .badge.count { background: rgba(0,212,255,0.1); color: var(--accent); }
+
+.func-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.func-main-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.func-main-header h2 { margin: 0; font-size: 1rem; }
+.func-main-body { flex: 1; overflow-y: auto; padding: 1.2rem 1.5rem; }
+.func-empty { text-align: center; color: var(--text-dim); padding: 3rem 1rem; font-size: 0.85rem; }
+
+.func-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.func-table th { text-align: left; padding: 0.5rem 0.8rem; background: rgba(0,212,255,0.05); color: var(--accent); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.func-table td { padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(0,212,255,0.06); color: var(--text); font-size: 0.8rem; }
+.func-table tr:hover td { background: rgba(0,212,255,0.03); }
+.func-table td code { font-size: 0.78rem; color: var(--accent); background: rgba(0,212,255,0.06); padding: 0.1rem 0.4rem; border-radius: 3px; }
+
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-box { background: rgba(8,12,32,0.98); border: 1px solid var(--accent); border-radius: 10px; padding: 1.8rem; width: 620px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+.modal-box h3 { margin: 0 0 1rem; color: var(--accent); font-size: 1rem; }
+.modal-box label { display: block; font-size: 0.78rem; color: var(--text-dim); margin: 0.6rem 0 0.2rem; }
+.modal-box input, .modal-box select, .modal-box textarea { width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: var(--text); padding: 0.5rem; border-radius: 4px; font-size: 0.82rem; outline: none; resize: vertical; }
+.modal-box input:focus, .modal-box select:focus, .modal-box textarea:focus { border-color: var(--accent); }
+.modal-box .btn-row { display: flex; gap: 0.6rem; margin-top: 1.2rem; }
+
+.btn { padding: 0.35rem 0.8rem; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font-size: 0.75rem; transition: all 0.2s; }
+.btn:hover { border-color: var(--accent); }
+.btn-accent { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+.btn-danger { border-color: #ef4444; color: #ef4444; }
+.btn-sm { padding: 0.15rem 0.5rem; font-size: 0.65rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="func-layout">
+
+    <aside class="func-sidebar">
+        <div class="func-sidebar-header">
+            <span class="func-sidebar-title">📋 函数分类</span>
+            <button class="btn btn-accent btn-sm" onclick="showTypeForm()">＋ 新建</button>
+        </div>
+        <div class="func-tree-wrap" id="treeWrap">
+            <div id="typeTree" style="text-align:center;color:var(--text-dim);padding:2rem;">加载中...</div>
+        </div>
+    </aside>
+
+    <main class="func-main">
+        <div class="func-main-header" id="mainHeader">
+            <h2 style="color:var(--text-dim);">← 请选择左侧分类</h2>
+        </div>
+        <div class="func-main-body" id="mainBody">
+            <div class="func-empty">选择左侧函数分类后此处显示该分类下的函数</div>
+        </div>
+    </main>
+</div>
+
+<div id="modalOverlay" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeModal()">
+    <div class="modal-box" id="modalBox" onclick="event.stopPropagation()"></div>
+</div>
+
+<script>
+var API_FUNC_TYPE = '/api/v1/function-types';
+var API_FUNC = '/api/v1/functions';
+
+var typeData = [];
+var activeType = null;
+var funcCountMap = {};
+
+async function apiGet(url) { var r=await fetch(url,{cache:'no-cache'}); if(!r.ok)throw Error(await r.text()); return r.json(); }
+async function apiPost(url,d) { var r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d),cache:'no-cache'}); if(!r.ok)throw Error(await r.text()); return r.json(); }
+async function apiPut(url,d) { var r=await fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d),cache:'no-cache'}); if(!r.ok)throw Error(await r.text()); return r.json(); }
+async function apiDel(url) { var r=await fetch(url,{method:'DELETE',cache:'no-cache'}); if(!r.ok)throw Error(await r.text()); return r.json(); }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function init(){
+    try { typeData = await apiGet(API_FUNC_TYPE); } catch(e){ console.error(e); }
+    await refreshCounts();
+    renderTypeTree();
+}
+init();
+
+async function refreshCounts(){
+    funcCountMap = {};
+    var all = await apiGet(API_FUNC);
+    all.forEach(function(d){
+        var tid = d.function_type_id;
+        if(tid){ funcCountMap[tid] = (funcCountMap[tid]||0) + 1; }
+    });
+}
+
+function renderTypeTree(){
+    var root = document.getElementById('typeTree');
+    if(!typeData.length){ root.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:2rem;">暂无分类，点击「＋ 新建」创建</div>'; return; }
+    var h = '';
+    typeData.forEach(function(t){
+        var isSys = t.is_system === '1';
+        var isActive = activeType && activeType.id === t.id;
+        var cnt = funcCountMap[t.id] || 0;
+        h += '<div class="func-tree-item' + (isActive?' active':'') + '" onclick="selectType(\x27' + t.id + '\x27)">' +
+            '<span class="label">' + esc(t.name) + '</span>' +
+            (cnt > 0 ? '<span class="badge count">' + cnt + '</span>' : '') +
+            (isSys ? '<span class="badge sys">预设</span>' : '') +
+        '</div>';
+    });
+    root.innerHTML = h;
+}
+
+async function selectType(typeId){
+    activeType = typeData.find(function(t){ return t.id === typeId; });
+    renderTypeTree();
+    await loadFuncs(typeId);
+}
+
+async function loadFuncs(typeId){
+    var body = document.getElementById('mainBody');
+    var hdr = document.getElementById('mainHeader');
+    try {
+        var all = await apiGet(API_FUNC);
+        var funcs = all.filter(function(d){ return d.function_type_id === typeId; });
+        var title = activeType ? esc(activeType.name) : typeId;
+        hdr.innerHTML = '<h2>📖 ' + title + ' <span style="font-size:0.72rem;color:var(--text-dim);">(' + funcs.length + ' 条)</span></h2>' +
+            '<button class="btn btn-accent btn-sm" onclick="showFuncForm()">＋ 新建函数</button>';
+
+        if(!funcs.length){ body.innerHTML = '<div class="func-empty">该分类下尚无函数，点击右上角「＋ 新建函数」创建</div>'; return; }
+
+        body.innerHTML = '<table class="func-table"><thead><tr><th>编码</th><th>名称</th><th>类路径</th><th>方法</th><th>类型</th><th>状态</th><th style="width:60px;">操作</th></tr></thead><tbody>' +
+            funcs.map(function(d){
+                return '<tr>' +
+                    '<td><code>' + esc(d.code||'—') + '</code></td>' +
+                    '<td>' + esc(d.name) + '</td>' +
+                    '<td>' + esc(d.function_classpath||'—') + '</td>' +
+                    '<td>' + esc(d.function_method||'—') + '</td>' +
+                    '<td>' + esc(d.function_type||'—') + '</td>' +
+                    '<td>' + (d.status==1?'✅':'⛔') + '</td>' +
+                    '<td><button class="btn btn-sm" onclick="showFuncForm(\x27' + d.id + '\x27)">✏</button>' +
+                        '<button class="btn btn-sm btn-danger" onclick="delFunc(\x27' + d.id + '\x27)">✕</button></td></tr>';
+            }).join('') + '</tbody></table>';
+    } catch(e) { body.innerHTML = '<div class="func-empty">加载失败: ' + esc(e.message) + '</div>'; }
+}
+
+// ── 函数分类 CRUD ──
+function showTypeForm(typeId){
+    var isEdit = !!typeId;
+    var ex = {};
+    if(isEdit){ ex = typeData.find(function(t){return t.id===typeId;}) || {}; }
+    document.getElementById('modalBox').innerHTML =
+        '<h3>' + (isEdit ? '编辑函数分类' : '新建函数分类') + '</h3>' +
+        '<label>分类名称 <span style="color:#ef4444;">*</span></label>' +
+        '<input id="ft-name" value="' + esc(ex.name||'') + '" placeholder="分类名称" maxlength="200" />' +
+        '<label>描述</label>' +
+        '<input id="ft-desc" value="' + esc(ex.function_description||'') + '" placeholder="分类描述" maxlength="500" />' +
+        '<div class="btn-row">' +
+            '<button class="btn btn-accent" onclick="' + (isEdit ? 'updType(\x27'+typeId+'\x27)' : 'addType()') + '">💾 保存</button>' +
+            '<button class="btn" onclick="closeModal()">取消</button>' +
+        '</div>';
+    document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+async function addType(){
+    var n = document.getElementById('ft-name').value.trim();
+    if(!n){ alert('请输入分类名称'); return; }
+    try {
+        await apiPost(API_FUNC_TYPE, {id:'', name:n, function_description:document.getElementById('ft-desc').value.trim()||null, is_system:'0'});
+        closeModal();
+        typeData = await apiGet(API_FUNC_TYPE);
+        renderTypeTree();
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+async function updType(id){
+    var n = document.getElementById('ft-name').value.trim();
+    if(!n){ alert('请输入分类名称'); return; }
+    try {
+        await apiPut(API_FUNC_TYPE+'/'+id, {name:n, function_description:document.getElementById('ft-desc').value.trim()||null});
+        closeModal();
+        typeData = await apiGet(API_FUNC_TYPE);
+        renderTypeTree();
+        if(activeType && activeType.id===id) { activeType = typeData.find(function(t){return t.id===id;}); await loadFuncs(id); }
+    } catch(e) { alert('更新失败: ' + e.message); }
+}
+
+async function delType(id){
+    if(!confirm('确定删除该函数分类？')) return;
+    try { await apiDel(API_FUNC_TYPE+'/'+id+'?soft=true'); typeData = await apiGet(API_FUNC_TYPE); if(activeType&&activeType.id===id){ activeType=null; document.getElementById('mainBody').innerHTML='<div class="func-empty">← 请选择左侧分类</div>'; } await refreshCounts(); renderTypeTree(); }
+    catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// ── 函数 CRUD ──
+function showFuncForm(funcId){
+    var isEdit = !!funcId;
+    (async function(){
+        var ex = {};
+        if(isEdit){ try { ex = await apiGet(API_FUNC+'/'+funcId); } catch(e){} }
+        var typeOptions = typeData.map(function(t){ return '<option value="'+t.id+'"'+(ex.function_type_id===t.id||(!isEdit&&activeType&&activeType.id===t.id)?' selected':'')+'>'+esc(t.name)+'</option>'; }).join('');
+        document.getElementById('modalBox').innerHTML =
+            '<h3>' + (isEdit ? '编辑函数' : '新建函数') + '</h3>' +
+            '<label>函数编码 <span style="color:#ef4444;">*</span></label>' +
+            '<input id="f-code" value="' + esc(ex.code||'') + '" placeholder="唯一标识，与图本体 func 对应" maxlength="100" />' +
+            '<label>函数名称 <span style="color:#ef4444;">*</span></label>' +
+            '<input id="f-name" value="' + esc(ex.name||'') + '" placeholder="函数名称" maxlength="100" />' +
+            '<label>所属分类</label>' +
+            '<select id="f-typeid"><option value="">— 无 —</option>' + typeOptions + '</select>' +
+            '<label>类路径</label>' +
+            '<input id="f-classpath" value="' + esc(ex.function_classpath||'') + '" placeholder="com.example.Func" maxlength="255" />' +
+            '<label>方法名</label>' +
+            '<input id="f-method" value="' + esc(ex.function_method||'') + '" placeholder="execute" maxlength="100" />' +
+            '<label>运行时类型</label>' +
+            '<select id="f-type">' +
+                ['PYTHON','JAVA','HTTP_API','SCRIPT'].map(function(v){ return '<option value="'+v+'"'+(ex.function_type===v?' selected':'')+'>'+v+'</option>'; }).join('') +
+            '</select>' +
+            '<label>超时(ms)</label>' +
+            '<input id="f-timeout" type="number" value="' + esc(ex.function_timeout_ms||'30000') + '" />' +
+            '<label>最大重试</label>' +
+            '<input id="f-retry" type="number" value="' + esc(ex.function_max_retry||'0') + '" />' +
+            '<label>状态</label>' +
+            '<select id="f-status">' +
+                '<option value="1"'+(ex.status==1?' selected':'')+'>✅ 启用</option>' +
+                '<option value="0"'+(ex.status==0?' selected':'')+'>⛔ 禁用</option>' +
+            '</select>' +
+            '<label>描述</label>' +
+            '<textarea id="f-desc" rows="3" placeholder="函数功能描述...">' + esc(ex.description||'') + '</textarea>' +
+            '<div class="btn-row">' +
+                '<button class="btn btn-accent" onclick="' + (isEdit ? 'updFunc(\x27'+funcId+'\x27)' : 'addFunc()') + '">💾 保存</button>' +
+                '<button class="btn" onclick="closeModal()">取消</button>' +
+            '</div>';
+        document.getElementById('modalOverlay').style.display = 'flex';
+    })();
+}
+
+async function addFunc(){
+    var code = document.getElementById('f-code').value.trim();
+    var name = document.getElementById('f-name').value.trim();
+    if(!code){ alert('请输入函数编码'); return; }
+    if(!name){ alert('请输入函数名称'); return; }
+    try {
+        await apiPost(API_FUNC, {
+            id:'', code:code, name:name,
+            function_type_id: document.getElementById('f-typeid').value || null,
+            function_classpath: document.getElementById('f-classpath').value.trim() || null,
+            function_method: document.getElementById('f-method').value.trim() || null,
+            function_type: document.getElementById('f-type').value,
+            function_timeout_ms: parseInt(document.getElementById('f-timeout').value)||30000,
+            function_max_retry: parseInt(document.getElementById('f-retry').value)||0,
+            status: parseInt(document.getElementById('f-status').value),
+            description: document.getElementById('f-desc').value.trim() || null
+        });
+        closeModal(); await refreshCounts(); renderTypeTree();
+        if(activeType) await loadFuncs(activeType.id);
+    } catch(e) { alert('创建失败: ' + e.message); }
+}
+
+async function updFunc(funcId){
+    var code = document.getElementById('f-code').value.trim();
+    var name = document.getElementById('f-name').value.trim();
+    if(!code){ alert('请输入函数编码'); return; }
+    if(!name){ alert('请输入函数名称'); return; }
+    try {
+        await apiPut(API_FUNC+'/'+funcId, {
+            code:code, name:name,
+            function_type_id: document.getElementById('f-typeid').value || null,
+            function_classpath: document.getElementById('f-classpath').value.trim() || null,
+            function_method: document.getElementById('f-method').value.trim() || null,
+            function_type: document.getElementById('f-type').value,
+            function_timeout_ms: parseInt(document.getElementById('f-timeout').value)||30000,
+            function_max_retry: parseInt(document.getElementById('f-retry').value)||0,
+            status: parseInt(document.getElementById('f-status').value),
+            description: document.getElementById('f-desc').value.trim() || null
+        });
+        closeModal(); await refreshCounts(); renderTypeTree();
+        if(activeType) await loadFuncs(activeType.id);
+    } catch(e) { alert('更新失败: ' + e.message); }
+}
+
+async function delFunc(funcId){
+    if(!confirm('确定删除该函数？')) return;
+    try { await apiDel(API_FUNC+'/'+funcId+'?soft=true'); await refreshCounts(); renderTypeTree(); if(activeType) await loadFuncs(activeType.id); }
+    catch(e) { alert('删除失败: ' + e.message); }
+}
+
+function closeModal(){ document.getElementById('modalOverlay').style.display = 'none'; }
+</script>
+{% endblock %}

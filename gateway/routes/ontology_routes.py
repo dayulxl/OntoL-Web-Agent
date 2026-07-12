@@ -2142,7 +2142,7 @@ class SceneDictCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="词典ID，留空自动生成UUID")
     scene_id: str = Field(..., max_length=32, description="所属场景ID")
     name: str = Field(..., max_length=200, description="词典名称")
-    code: Optional[str] = Field(None, max_length=100, description="词典编码")
+    code: str = Field(..., max_length=100, description="词典编码（必填唯一）")
     dictionary_type_id: Optional[str] = Field(None, max_length=32, description="词条分类ID")
     dictionary_content: Optional[str] = Field(None, description="词典内容")
 
@@ -2210,7 +2210,7 @@ async def create_dict_direct(body: SceneDictCreate):
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
         await _execute_scene(
             "INSERT INTO ontol_scene_dictionary (id, scene_id, name, code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
-            (dict_id, body.scene_id, body.name, body.code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
+            (dict_id, body.scene_id, body.name, body.code, body.dictionary_type_id or None, body.dictionary_content or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         return rows[0]
@@ -2246,7 +2246,7 @@ async def create_dict(scene_id: str, body: SceneDictCreate):
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
         await _execute_scene(
             "INSERT INTO ontol_scene_dictionary (id, scene_id, name, code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
-            (dict_id, scene_id, body.name, body.code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
+            (dict_id, scene_id, body.name, body.code, body.dictionary_type_id or None, body.dictionary_content or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         return rows[0]
@@ -2583,3 +2583,169 @@ async def delete_llm_config(config_id: str, soft: bool = True):
         return {"deleted": True, "config_id": config_id, "soft": soft}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete config failed: {e}")
+
+
+# =========================================================================
+# 动态函数类型 CRUD (ontol_function_type)
+# =========================================================================
+
+class FunctionTypeCreate(BaseModel):
+    id: str = Field(default="", max_length=32)
+    name: str = Field(..., max_length=200)
+    function_description: Optional[str] = Field(None, max_length=500)
+    is_system: Optional[str] = Field("0", max_length=2)
+
+class FunctionTypeUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=200)
+    function_description: Optional[str] = Field(None, max_length=500)
+    is_system: Optional[str] = Field(None, max_length=2)
+    delete_flag: Optional[str] = Field(None, max_length=2)
+
+
+@router.get("/function-types")
+async def list_function_types():
+    try:
+        rows = await _query_scene(
+            "SELECT * FROM ontol_function_type WHERE delete_flag='0' ORDER BY create_time DESC"
+        )
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+@router.get("/function-types/{type_id}")
+async def get_function_type(type_id: str):
+    try:
+        rows = await _query_scene("SELECT * FROM ontol_function_type WHERE id=? AND delete_flag='0'", (type_id,))
+        if not rows: raise HTTPException(status_code=404, detail=f"Type {type_id} not found")
+        return rows[0]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+@router.post("/function-types", status_code=201)
+async def create_function_type(body: FunctionTypeCreate):
+    import uuid as _uuid
+    try:
+        tid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        await _execute_scene(
+            "INSERT INTO ontol_function_type (id, name, function_description, is_system) VALUES (?,?,?,?)",
+            (tid, body.name, body.function_description or None, body.is_system or "0"),
+        )
+        rows = await _query_scene("SELECT * FROM ontol_function_type WHERE id=?", (tid,))
+        return rows[0]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(status_code=500, detail=f"Create failed: {e}")
+
+@router.put("/function-types/{type_id}")
+async def update_function_type(type_id: str, body: FunctionTypeUpdate):
+    try:
+        existing = await _query_scene("SELECT id FROM ontol_function_type WHERE id=? AND delete_flag='0'", (type_id,))
+        if not existing: raise HTTPException(status_code=404, detail=f"Type {type_id} not found")
+        data = body.model_dump(exclude_none=True)
+        if data:
+            sets = ", ".join(f"{k}=?" for k in data)
+            await _execute_scene(f"UPDATE ontol_function_type SET {sets} WHERE id=?", tuple(data.values()) + (type_id,))
+        rows = await _query_scene("SELECT * FROM ontol_function_type WHERE id=?", (type_id,))
+        return rows[0]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(status_code=500, detail=f"Update failed: {e}")
+
+@router.delete("/function-types/{type_id}")
+async def delete_function_type(type_id: str, soft: bool = True):
+    try:
+        if soft:
+            await _execute_scene("UPDATE ontol_function_type SET delete_flag='1' WHERE id=?", (type_id,))
+        else:
+            await _execute_scene("DELETE FROM ontol_function_type WHERE id=?", (type_id,))
+        return {"deleted": True, "type_id": type_id, "soft": soft}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+
+
+# =========================================================================
+# 动态函数 CRUD (ontol_function)
+# =========================================================================
+
+class FunctionCreate(BaseModel):
+    id: str = Field(default="", max_length=32)
+    function_type_id: Optional[str] = Field(None, max_length=32)
+    code: str = Field(..., max_length=100, description="函数唯一标识")
+    name: str = Field(..., max_length=100, description="函数名称简写")
+    function_classpath: Optional[str] = Field(None, max_length=255)
+    function_method: Optional[str] = Field(None, max_length=100)
+    function_type: Optional[str] = Field("PYTHON", max_length=20)
+    function_timeout_ms: Optional[int] = 30000
+    function_max_retry: Optional[int] = 0
+    status: Optional[int] = 1
+    description: Optional[str] = None
+
+class FunctionUpdate(BaseModel):
+    function_type_id: Optional[str] = Field(None, max_length=32)
+    code: Optional[str] = Field(None, max_length=100)
+    name: Optional[str] = Field(None, max_length=100)
+    function_classpath: Optional[str] = Field(None, max_length=255)
+    function_method: Optional[str] = Field(None, max_length=100)
+    function_type: Optional[str] = Field(None, max_length=20)
+    function_timeout_ms: Optional[int] = None
+    function_max_retry: Optional[int] = None
+    status: Optional[int] = None
+    description: Optional[str] = None
+    delete_flag: Optional[str] = Field(None, max_length=2)
+
+
+@router.get("/functions")
+async def list_functions():
+    try:
+        rows = await _query_scene(
+            "SELECT * FROM ontol_function WHERE delete_flag='0' ORDER BY create_time DESC"
+        )
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+@router.get("/functions/{func_id}")
+async def get_function(func_id: str):
+    try:
+        rows = await _query_scene("SELECT * FROM ontol_function WHERE id=? AND delete_flag='0'", (func_id,))
+        if not rows: raise HTTPException(status_code=404, detail=f"Function {func_id} not found")
+        return rows[0]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+@router.post("/functions", status_code=201)
+async def create_function(body: FunctionCreate):
+    import uuid as _uuid
+    try:
+        fid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        await _execute_scene(
+            "INSERT INTO ontol_function (id, function_type_id, code, name, function_classpath, function_method, function_type, function_timeout_ms, function_max_retry, status, description) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (fid, body.function_type_id or None, body.code, body.name, body.function_classpath or None, body.function_method or None, body.function_type or "PYTHON", body.function_timeout_ms or 30000, body.function_max_retry or 0, body.status or 1, body.description or None),
+        )
+        rows = await _query_scene("SELECT * FROM ontol_function WHERE id=?", (fid,))
+        return rows[0]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(status_code=500, detail=f"Create failed: {e}")
+
+@router.put("/functions/{func_id}")
+async def update_function(func_id: str, body: FunctionUpdate):
+    try:
+        existing = await _query_scene("SELECT id FROM ontol_function WHERE id=? AND delete_flag='0'", (func_id,))
+        if not existing: raise HTTPException(status_code=404, detail=f"Function {func_id} not found")
+        data = body.model_dump(exclude_none=True)
+        if data:
+            sets = ", ".join(f"{k}=?" for k in data)
+            await _execute_scene(f"UPDATE ontol_function SET {sets} WHERE id=?", tuple(data.values()) + (func_id,))
+        rows = await _query_scene("SELECT * FROM ontol_function WHERE id=?", (func_id,))
+        return rows[0]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(status_code=500, detail=f"Update failed: {e}")
+
+@router.delete("/functions/{func_id}")
+async def delete_function(func_id: str, soft: bool = True):
+    try:
+        if soft:
+            await _execute_scene("UPDATE ontol_function SET delete_flag='1' WHERE id=?", (func_id,))
+        else:
+            await _execute_scene("DELETE FROM ontol_function WHERE id=?", (func_id,))
+        return {"deleted": True, "func_id": func_id, "soft": soft}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
