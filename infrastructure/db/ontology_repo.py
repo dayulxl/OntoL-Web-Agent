@@ -92,7 +92,7 @@ class OntologyRepo:
         model = await self.model.get_by_id(model_id)
         if not model:
             return None
-        attrs = await self.attr.list(where={"ontol_model_id": model_id}, order_by="attr_relation_flag DESC, attr_code")
+        attrs = await self.attr.list(where={"ontol_model_id": model_id}, order_by="attr_is_system DESC, attr_order, attr_code")
         model["attributes"] = attrs
         return model
 
@@ -111,7 +111,7 @@ class OntologyRepo:
                 f"""
                 SELECT * FROM ontol_model_attr
                 WHERE ontol_model_id IN ({placeholders}) AND delete_flag = '0'
-                ORDER BY attr_relation_flag DESC, attr_code
+                ORDER BY attr_is_system DESC, attr_order, attr_code
                 """,
                 *model_ids,
             )
@@ -124,12 +124,12 @@ class OntologyRepo:
             node["attributes"] = attr_map.get(node["id"], [])
         return tree
 
-    async def get_attrs_by_model(self, model_id: str, *, relation_flag: Optional[str] = None) -> list[dict]:
+    async def get_attrs_by_model(self, model_id: str, *, is_system: Optional[str] = None) -> list[dict]:
         """获取模型属性列表。"""
         where = {"ontol_model_id": model_id}
-        if relation_flag:
-            where["attr_relation_flag"] = relation_flag
-        return await self.attr.list(where=where, order_by="attr_relation_flag DESC, attr_code")
+        if is_system:
+            where["attr_is_system"] = is_system
+        return await self.attr.list(where=where, order_by="attr_is_system DESC, attr_order, attr_code")
 
     # ==================================================================
     # 搜索
@@ -148,13 +148,21 @@ class OntologyRepo:
     # ==================================================================
 
     async def get_stats(self) -> dict:
-        """获取全局统计。"""
+        """获取全局统计：本体模型 + 词典 + 场景。"""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT
-                    (SELECT count(*) FROM ontol_model WHERE delete_flag='0') AS model_count,
-                    (SELECT count(*) FROM ontol_model_attr WHERE delete_flag='0') AS attr_count
+                    (SELECT count(*) FROM ontol_model WHERE delete_flag='0')        AS model_count,
+                    (SELECT count(*) FROM ontol_model_attr WHERE delete_flag='0')    AS attr_count,
+                    (SELECT count(*) FROM ontol_model_scene WHERE delete_flag='0')   AS scene_count,
+                    (SELECT count(*) FROM ontol_scene_prompt WHERE delete_flag='0')  AS prompt_count,
+                    (SELECT count(*) FROM ontol_scene_dictionary WHERE delete_flag='0') AS dict_count,
+                    (SELECT count(*) FROM ontol_dictionary_type WHERE delete_flag='0')  AS dict_type_count,
+                    (SELECT count(*) FROM ontol_scene_dictionary_relation WHERE delete_flag='0') AS dict_rel_count
                 """
             )
-            return dict(row) if row else {"model_count": 0, "attr_count": 0}
+            return dict(row) if row else {
+                "model_count": 0, "attr_count": 0, "scene_count": 0,
+                "prompt_count": 0, "dict_count": 0, "dict_type_count": 0, "dict_rel_count": 0,
+            }

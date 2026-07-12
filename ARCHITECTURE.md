@@ -432,22 +432,89 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 
 ## 8. 数据库表总览 🆕
 
-### 8.1 SQLite (ontol.db) — 12 张表
+### 8.1 SQLite (ontol.db) — 14 张表
 
-| 表 | 行数 | 用途 |
-|----|------|------|
-| `ontol_model` | 12 | 本体模型定义（树形，M_ROOT + 子模型） |
-| `ontol_model_attr` | 28 | 模型属性字段（28个活跃，24系统+4自定义） |
-| `ontol_model_scene` | 可变 | 推演场景（system预设受保护） |
-| `ontol_scene_prompt` | 可变 | 🆕 场景提示词（CRUD + 聊天关联） |
-| `ontol_char_scene_relation` | 可变 | 对话 ↔ 场景绑定 |
-| `ontol_node_scene_relation` | 可变 | 图节点 ↔ 场景绑定 |
-| `ontol_data_his` | 可变 | 节点变更历史（自动版本递增） |
-| `ontol_datasource` | 可变 | 数据源配置 |
-| `ontol_datasource_type` | 可变 | 数据源类型（`is_system` 区分系统预设/自定义） |
-| `ontol_datasource_type` | 可变 | 数据源类型（`is_system` 区分系统预设/自定义） |
+| 表 | 用途 |
+|----|------|
+| `ontol_model` | 本体模型定义（树形结构，M_ROOT + 子模型） |
+| `ontol_model_attr` | 模型属性字段（28个有效字段，attr_is_system 区分系统预设/自定义） |
+| `ontol_model_scene` | 推演场景（scene_is_system 区分系统预设/自定义） |
+| `ontol_scene_prompt` | 场景提示词模板（场景内可建多个，AI 对话动态匹配） |
+| `ontol_scene_dictionary` | 场景词典词条（ontology 边属性 + 字段语义描述） |
+| `ontol_dictionary_type` | 词典词条分类（is_system 区分系统预设/自定义） |
+| `ontol_scene_dictionary_relation` | 场景 ↔ 词典词条关联（多对多关系） |
+| `ontol_char_scene_relation` | 对话 ↔ 场景绑定（多对多关系） |
+| `ontol_node_scene_relation` | 图节点 ↔ 场景绑定（多对多关系） |
+| `ontol_data_his` | 图数据变更历史（节点 CRUD 自动记录 + 版本递增） |
+| `ontol_datasource` | 数据源配置（MySQL/PG/Oracle 等） |
+| `ontol_datasource_type` | 数据源类型（is_system 区分系统预设/自定义） |
+| `ontol_datasource_log` | 数据源同步日志（批次号 + 业务流水号） |
+| `ontol_llm_config` | LLM 模型配置（url/key/model，对 ontol_llm_type_config 多对一） |
+| `ontol_llm_type_config` | LLM 类型与子类型配置 |
 
-### 8.2 Memgraph (图数据库)
+### 8.2 表设计约束规范 🆕
+
+> ⚠️ **核心约束**：所有 SQLite 表（`ontol_*`）在建表时 **必须** 包含以下 6 个通用字段。如果建表语句缺少任一字段，必须自动补上。
+
+#### 8.2.1 通用字段定义
+
+| 字段名称 | 数据类型（建议） | 约束条件 | 说明 |
+|----------|-----------------|----------|------|
+| `id` | TEXT / BIGINT | PRIMARY KEY, NOT NULL | 全局唯一主键，由后端 `uuid.uuid4().hex[:16]` 自动生成；图数据库用 Snowflake int64 |
+| `create_time` | TEXT / DATETIME | NOT NULL, DEFAULT `(datetime('now'))` | 记录创建时间，默认值为当前时间，不可由前端传入 |
+| `create_user` | TEXT / VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录创建人标识（如用户ID或账号），追溯数据来源 |
+| `update_time` | TEXT / DATETIME | NOT NULL, DEFAULT `''` | 记录最后更新时间，每次更新由后端自动刷新为当前时间 |
+| `update_user` | TEXT / VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录最后更新人标识，每次更新由后端自动刷新 |
+| `delete_flag` | TEXT / TINYINT | NOT NULL, DEFAULT `'0'` | 逻辑删除标志（`'0'`-未删除，`'1'`-已删除），物理删除禁止 |
+
+#### 8.2.2 标准 DDL 模板
+
+```sql
+CREATE TABLE IF NOT EXISTS ontol_xxx (
+    id              TEXT PRIMARY KEY,
+    -- ... 业务字段 ...
+    create_time     TEXT NOT NULL DEFAULT (datetime('now')),
+    create_user     TEXT NOT NULL DEFAULT '',
+    update_time     TEXT NOT NULL DEFAULT '',
+    update_user     TEXT NOT NULL DEFAULT '',
+    delete_flag     TEXT NOT NULL DEFAULT '0'
+);
+```
+
+#### 8.2.3 后端 CRUD 行为规范
+
+| 操作 | 字段行为 |
+|------|----------|
+| **INSERT** | `id` 自动生成 UUID；`create_time` 取当前时间；`create_user` 从请求上下文注入；`update_time`/`update_user` 留空字符串；`delete_flag` 默认 `'0'` |
+| **UPDATE** | `update_time` 自动刷新为当前时间；`update_user` 从请求上下文注入；`id`/`create_time`/`create_user` 不可更新 |
+| **DELETE** | 仅软删除：`UPDATE SET delete_flag = '1', update_time = datetime('now')`；**绝不**执行物理 `DELETE FROM` |
+| **SELECT** | 所有查询必须追加 `WHERE delete_flag = '0'`（除非元数据管理页面显式展示已删除数据） |
+
+#### 8.2.4 现有表合规检查
+
+| 表 | `id` | `create_time` | `create_user` | `update_time` | `update_user` | `delete_flag` | 状态 |
+|----|------|---------------|---------------|---------------|---------------|---------------|------|
+| `ontol_model` | ✅ TEXT PK | ✅ | ⚠️ `create_id` | ✅ | ⚠️ `update_id` | ✅ | 字段名需对齐 |
+| `ontol_model_attr` | ✅ TEXT PK | ✅ | ⚠️ `create_id` | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_model_scene` | ✅ TEXT PK | ✅ | ⚠️ `create_id` | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_scene_prompt` | ✅ TEXT PK | ✅ | ⚠️ `create_id` | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_scene_dictionary` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_dictionary_type` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_datasource_type` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_datasource` | ⚠️ INTEGER PK | ✅ | ⚠️ `created_by` | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | 待修复 |
+| `ontol_datasource_log` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | 待补全 |
+| `ontol_scene_dictionary_relation` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_llm_config` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+| `ontol_llm_type_config` | ✅ TEXT PK | ✅ | ❌ 缺失 | ❌ 缺失 | ❌ 缺失 | ✅ | 待补全 |
+
+#### 8.2.5 迁移规则
+
+1. **新建表**：严格按 8.2.2 模板，6 个通用字段一个不能少
+2. **已有表**：通过 `ALTER TABLE ADD COLUMN` 逐字段补全，补充的列使用 `NOT NULL DEFAULT ''` 兼容已有数据
+3. **历史命名**：`create_id` → `create_user`，`update_id` → `update_user`，`created_by` → `create_user`
+4. **图数据库（Memgraph）**：仅节点/边属性参照执行，`id` 使用 Snowflake int64，其余字段按 key-value 标量类型存储
+
+### 8.3 Memgraph (图数据库)
 
 - **ID 标准**：所有节点和边的 `id` 属性使用 **Snowflake 算法** 生成 **64 位纯数字整数**（`int64`，不转字符串），结构为 `timestamp(42bit) | datacenter(5bit) | worker(5bit) | sequence(12bit)`，纪元 2020-01-01
 - **ID 生成**：导入时由 `SnowflakeGenerator`（`gateway/routes/ontology_routes.py`）生成，先查询图中已有 ID 去重，确保全局唯一
