@@ -206,7 +206,15 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - **必须提醒用户**，说明冲突的具体位置和性质
 - **禁止擅自写补偿代码** — 不能静默写额外的修复/桥接代码绕开冲突，用户必须知晓并决定
 
-相关内存：[[warn-on-code-conflict]] [[read-all-code-before-writing]]
+### 提交前必须做的事
+
+1. **检查 CLAUDE.md 是最新的** — 确认新增/修改的页面功能、API 路由、关键函数、数据规范都已写入文档
+2. **更新后再提交** — CLAUDE.md 与代码同步后，才能 `git add -A` + `git commit`
+3. **commit message 要体现文档更新** — 如果 CLAUDE.md 被改了，message 里要提
+
+为什么：代码和文档不同步会误导后续开发。CLAUDE.md 是这个项目的唯一事实标准参考。
+
+相关内存：[[update-claude-md-before-commit]] [[warn-on-code-conflict]] [[read-all-code-before-writing]]
 
 ## 设计原则
 
