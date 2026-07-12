@@ -377,6 +377,33 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         )
     """)
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_oltc_del ON ontol_llm_type_config(delete_flag)")
+
+    # ── 动态函数配置表 ──
+    _conn._exec("""
+        CREATE TABLE IF NOT EXISTS ontol_function (
+            id                  TEXT PRIMARY KEY,
+            function_name       TEXT    NOT NULL,
+            function_classpath  TEXT,
+            function_method     TEXT,
+            function_type       TEXT    NOT NULL DEFAULT 'PYTHON',
+            function_timeout_ms INTEGER NOT NULL DEFAULT 30000,
+            function_max_retry  INTEGER NOT NULL DEFAULT 0,
+            status              INTEGER NOT NULL DEFAULT 1,
+            description         TEXT,
+            create_time         TEXT    NOT NULL DEFAULT (datetime('now')),
+            create_user         TEXT    NOT NULL DEFAULT '',
+            update_time         TEXT    NOT NULL DEFAULT '',
+            update_user         TEXT    NOT NULL DEFAULT '',
+            delete_flag         TEXT    NOT NULL DEFAULT '0'
+        )
+    """)
+    _conn._exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ofunc_name_active "
+        "ON ontol_function(function_name) WHERE delete_flag = '0'"
+    )
+    _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_del ON ontol_function(delete_flag)")
+    _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_type ON ontol_function(function_type)")
+
     # 迁移：删除已存在的 llm_type 列，添加 is_system 列
     oltc_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_llm_type_config')")]
     if "llm_type" in oltc_cols:
@@ -403,6 +430,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "ontol_scene_dictionary_relation",
         "ontol_llm_config",
         "ontol_llm_type_config",
+        "ontol_function",
     ]
     for tbl in _MIGRATE_TABLES:
         cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
