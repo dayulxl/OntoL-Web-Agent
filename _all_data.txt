@@ -1,0 +1,43 @@
+=== ontol_model (11 rows) ===
+M_ROOT               | parent=-        | 本体父节点  | type=M0
+M_BASE_ONTOLOGY      | parent=M_ROOT   | 基本本体   | type=M1
+M_ENTITY             | parent=M_ROOT   | 实体     | type=M1
+M_BEHAVIOR           | parent=M_ROOT   | 行为     | type=M2
+M_RULE               | parent=M_ROOT   | 规则     | type=M3
+M_SCENE              | parent=M_ROOT   | 场景     | type=M4
+M_AGENT              | parent=M_ROOT   | 主体     | type=M5
+M_EXCEPTION          | parent=M_ROOT   | 异常补偿   | type=M6
+M_QUALITY            | parent=M_ROOT   | 质量约束   | type=M7
+M_AGGR               | parent=M_ROOT   | 聚合本体   | type=M8
+M_EVENT              | parent=M_ROOT   | 事件     | type=ME
+
+=== ontol_model_attr (29 rows) ===
+ 1 | id                   | 技术主键     | VARCHAR    | len=50     | req=Y sys=S | 图全局唯一，静态
+ 2 | unit_id              | 关联业务主键   | VARCHAR    | len=50     | req=  sys=S | mysql绑定持久化数据的唯一主键
+ 3 | graph_id             | 硬盘图主键    | VARCHAR    | len=50     | req=  sys=S | neo4j内存图的主键
+ 4 | domain               | 领域       | VARCHAR    | len=50     | req=  sys=S | 领域ID，业务领域划分，给算法用的
+ 5 | leven                | 层级       | INTEGER    | len=4      | req=  sys=S | 本体层级L0-L5，给算法用的
+ 6 | code                 | 编码       | VARCHAR    | len=100    | req=Y sys=S | 业务编码
+ 7 | name                 | 名称       | VARCHAR    | len=200    | req=Y sys=S | 名称
+ 8 | type                 | 类型       | VARCHAR    | len=4      | req=  sys=S | 类型，存的是本体类型代码(M1-M7)
+ 9 | update_time          | 更新时间     | DATETIME   | len=到秒即可   | req=  sys=S | neo4j默认支持的时间格式
+10 | create_time          | 创建时间     | DATETIME   | len=到秒即可   | req=  sys=S | neo4j默认支持的时间格式
+11 | confidence           | 置信度      | FLOAT      | len=4      | req=  sys=S | 百分数，如果没有按照默认的80%处理
+12 | description          | 描述       | VARCHAR    | len=500    | req=  sys=S | 
+13 | status               | 状态       | VARCHAR    | len=4      | req=  sys=S | 枚举值：有效/无效
+14 | version              | 数据版本     | VARCHAR    | len=32     | req=  sys=S | 示例v1.0,提交更新大版本，保存更新小版本
+15 | cope_version         | 副本版本     | VARCHAR    | len=32     | req=  sys=S | 推演环境的副本版本
+16 | source               | 来源       | VARCHAR    | len=50     | req=  sys=S | 
+17 | owner                | 维护人员     | VARCHAR    | len=50     | req=  sys=S | 所属人，责任人
+18 | hasPrecondition      | 触发前约束    | VARCHAR    | len=500    | req=  sys=S | SHACL执行语言为True以及什么都没写时可执行其他属性的函数，返回值为fal
+19 | hasEffect            | 效果       | VARCHAR    | len=500    | req=  sys=S | 语言触发
+20 | hasCost              | 消耗       | VARCHAR    | len=500    | req=  sys=S | 当触发前约束通过的时候，就执行这个函数
+21 | hasDuration          | 持续时间     | VARCHAR    | len=500    | req=  sys=S | 秒，时序，用来做执行不同的节点用的时间排序，当执行完成了才会触发效果，未写默认0
+22 | hasPriority          | 优先级      | VARCHAR    | len=500    | req=  sys=S | 从0到10级，冲突的时候，优先级高的先行，10级最高，未写默认0
+23 | isComposedOf         | 其他行为组合   | VARCHAR    | len=500    | req=  sys=S | 可以写多个，跳到其他本体对象去,格式是ID或名称，用分号隔离
+24 | synonym              | 同义词      | VARCHAR    | len=500    | req=  sys=S | 同义词，增加检索准确性
+25 | queryVariant         | 错意词      | VARCHAR    | len=500    | req=  sys=S | 大家容易输错的词或者拼写
+26 | desc                 | 描述       | VARCHAR    | len=255    | req=  sys=  | 基本本体描述
+28 | graph_zone           | 图转换区     | VARCHAR    | len=10     | req=  sys=S | 图转换区标识，用于图数据库转换时的分区标记
+29 | is_graph_index       | 是否图索引    | VARCHAR    | len=10     | req=  sys=S | 是否作为图索引节点: id/code/name/synonym/queryVar
+30 | remark               | 备注       | VARCHAR    | len=2000   | req=  sys=S | 备注信息，2000字以内

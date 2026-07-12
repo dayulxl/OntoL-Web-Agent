@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}工作流: {{ workflow.name }} — LangGraph Cluster{% endblock %}
+
+{% block content %}
+<h1>{{ workflow.name }}</h1>
+
+<dl>
+    <dt>状态</dt>
+    <dd>{{ workflow.status }}</dd>
+    <dt>节点数</dt>
+    <dd>{{ workflow.node_count }}</dd>
+</dl>
+
+<a href="/">← 返回列表</a>
+{% endblock %}

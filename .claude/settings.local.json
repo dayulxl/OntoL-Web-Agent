@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"http://localhost:8000/api/v1/ontology/nodes?label=Entity&limit=5\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/ontology/nodes -H 'Content-Type: application/json' -d '{\"label\":\"Entity\",\"properties\":{\"name\":\"测试节点A\",\"code\":\"TEST_A\",\"domain\":\"军事\",\"status\":\"有效\",\"version\":\"v1.0\",\"confidence\":\"0.85\",\"description\":\"这是一个测试用的实体节点\",\"remark\":\"测试备注\"}}')",
+      "Bash(PYTHONIOENCODING=utf-8 /c/Users/admin/AppData/Local/pypoetry/Cache/virtualenvs/langgraph-cluster-AHI-zXgB-py3.14/Scripts/python.exe -c ' *)",
+      "Bash(curl -s -X DELETE \"http://127.0.0.1:8000/api/v1/llm-configs/05567cc9efb84602?soft=true\")",
+      "Bash(curl -s -X DELETE \"http://127.0.0.1:8000/api/v1/llm-type-configs/c7599558d4164cb7?soft=true\")",
+      "Bash(curl -s http://127.0.0.1:8000/api/v1/scenes)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/scenes -H \"Content-Type: application/json\" --data-raw \"{\\\\\"scene_name\\\\\":\\\\\"test_navy\\\\\",\\\\\"scene_code\\\\\":\\\\\"NAVY_01\\\\\",\\\\\"scene_desc\\\\\":\\\\\"navy test scene\\\\\"}\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/scenes -H \"Content-Type: application/json\" --data-raw \"{\\\\\"scene_name\\\\\":\\\\\"test_air\\\\\",\\\\\"scene_code\\\\\":\\\\\"AIR_01\\\\\",\\\\\"scene_desc\\\\\":\\\\\"air force test scene\\\\\"}\")",
+      "Bash(curl -s -X DELETE \"http://127.0.0.1:8000/api/v1/prompts/3eee564350164336?soft=true\")",
+      "Bash(curl -s -X DELETE \"http://127.0.0.1:8000/api/v1/scenes/099762f461d74496?soft=true\")"
+    ]
+  }
+}

@@ -13,8 +13,7 @@ venv/
 # Environment (contains secrets)
 .env
 
-# SQLite database
-*.db
+# SQLite database (ontol.db 需要版本控制)
 
 # Uploads
 infrastructure/storage/uploads/*

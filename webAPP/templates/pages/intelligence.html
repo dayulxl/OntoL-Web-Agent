@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}情报展示 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.intel-layout {
+    display: flex;
+    height: calc(100vh - 60px);
+    position: relative;
+    z-index: 1;
+}
+
+/* ---- 左侧信息源列表 ---- */
+.intel-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: rgba(8, 12, 32, 0.96);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.intel-sidebar-header {
+    padding: 1rem 1rem 0.6rem;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+    flex-shrink: 0;
+}
+
+.intel-sidebar-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.intel-search {
+    display: flex; align-items: center; gap: 0.4rem;
+    background: rgba(0, 212, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.4rem 0.6rem;
+}
+.intel-search input {
+    background: transparent; border: none; color: var(--text);
+    font-size: 0.82rem; width: 100%; padding: 0; outline: none;
+}
+
+.intel-list {
+    flex: 1; overflow-y: auto; padding: 0.5rem 0;
+}
+.intel-list::-webkit-scrollbar { width: 4px; }
+.intel-list::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+
+.intel-item {
+    padding: 0.7rem 1rem;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+    font-size: 0.84rem;
+    color: var(--text);
+}
+.intel-item:hover { background: rgba(0, 212, 255, 0.06); }
+.intel-item.active {
+    border-left-color: var(--accent);
+    background: rgba(0, 212, 255, 0.08);
+    color: var(--accent);
+}
+.intel-item .time { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; }
+
+/* ---- 右侧详情 ---- */
+.intel-main {
+    flex: 1; overflow-y: auto; padding: 2rem 2.5rem;
+    background:
+        radial-gradient(ellipse at 70% 20%, rgba(0, 212, 255, 0.03) 0%, transparent 60%),
+        radial-gradient(ellipse at 30% 80%, rgba(124, 58, 237, 0.03) 0%, transparent 60%);
+}
+.intel-main::-webkit-scrollbar { width: 6px; }
+.intel-main::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 3px; }
+
+.intel-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100%; text-align: center; color: var(--text-dim);
+}
+.intel-empty .icon { font-size: 4rem; margin-bottom: 1.5rem; opacity: 0.35; }
+.intel-empty h2 { color: #fff; font-size: 1.3rem; }
+
+.intel-detail-header {
+    margin-bottom: 2rem; padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.intel-detail-header h1 { font-size: 1.8rem; }
+.intel-detail-header .meta {
+    color: var(--text-dim); font-size: 0.8rem; margin-top: 0.4rem;
+}
+.intel-detail-header .tags {
+    display: flex; gap: 0.5rem; margin-top: 0.8rem; flex-wrap: wrap;
+}
+.intel-tag {
+    padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem;
+    border: 1px solid var(--border); color: var(--text-dim);
+    background: rgba(0,212,255,0.04);
+}
+.intel-section { margin-bottom: 2rem; }
+.intel-section h3 { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; color: var(--text); }
+.intel-section h3 .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--primary-glow);
+}
+.intel-content {
+    background: rgba(0,0,0,0.2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.2rem; font-size: 0.84rem;
+    line-height: 1.8; color: #c0c8e0; white-space: pre-wrap;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="intel-layout">
+    <!-- 左侧：情报源列表 -->
+    <aside class="intel-sidebar">
+        <div class="intel-sidebar-header">
+            <div class="intel-sidebar-title">📡 情报源</div>
+            <div class="intel-search">
+                <span style="opacity:0.5;">🔍</span>
+                <input id="intelSearch" type="text" placeholder="搜索情报..." oninput="filterIntels()" autocomplete="off" />
+            </div>
+        </div>
+        <div class="intel-list" id="intelList">
+            <div style="padding:2rem;text-align:center;color:var(--text-dim);font-size:0.82rem;">加载中...</div>
+        </div>
+    </aside>
+
+    <!-- 右侧：情报详情 -->
+    <main class="intel-main" id="intelMain">
+        <div class="intel-empty">
+            <div class="icon">📡</div>
+            <h2>情报展示</h2>
+            <p style="max-width:360px;font-size:0.85rem;line-height:1.7;">从 Neo4j 知识图谱查询实体信息，包括位置、状态、行为属性和关联关系。</p>
+        </div>
+    </main>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const API = '/api/v1/ontology';
+
+async function api(path, opts) {
+    const r = await fetch(API + path, opts);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+
+let intels = [];
+let activeIntel = null;
+
+// ── 从 Neo4j 加载所有 Entity 节点作为情报 ──
+async function loadIntels() {
+    try {
+        intels = await api('/nodes?label=Entity&limit=200');
+        renderIntels();
+    } catch(e) {
+        document.getElementById('intelList').innerHTML =
+            `<div style="padding:1rem;color:#ef4444;font-size:0.8rem;">❌ ${e.message}</div>`;
+    }
+}
+
+function filterIntels() {
+    renderIntels();
+}
+
+function renderIntels() {
+    const kw = (document.getElementById('intelSearch')?.value || '').trim().toLowerCase();
+    const list = document.getElementById('intelList');
+    const filtered = intels.filter(i => {
+        const name = (i.properties?.name || '').toLowerCase();
+        const code = (i.properties?.code || '').toLowerCase();
+        return !kw || name.includes(kw) || code.includes(kw);
+    });
+
+    list.innerHTML = filtered.map(i => {
+        const name = i.properties?.name || '#' + i.id;
+        const code = i.properties?.code || '';
+        const status = i.properties?.status || '—';
+        return `<div class="intel-item${activeIntel?.id === i.id ? ' active' : ''}" data-id="${i.id}">
+            <div>${name}</div>
+            <div class="time">${code} · ${status}</div>
+        </div>`;
+    }).join('') || '<div style="padding:1rem;text-align:center;color:var(--text-dim);font-size:0.8rem;">无匹配情报</div>';
+
+    // 绑定点击
+    list.querySelectorAll('.intel-item').forEach(el => {
+        el.addEventListener('click', () => {
+            const id = Number(el.dataset.id);
+            const intel = intels.find(i => i.id === id);
+            if (intel) {
+                list.querySelectorAll('.intel-item').forEach(e => e.classList.remove('active'));
+                el.classList.add('active');
+                activeIntel = intel;
+                showDetail(intel);
+            }
+        });
+    });
+}
+
+async function showDetail(intel) {
+    document.getElementById('intelMain').innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:center;padding:3rem;"><div class="ot-spinner"></div></div>';
+
+    try {
+        const detail = await api('/nodes/' + intel.id);
+        const props = detail.properties || {};
+        const rels = detail.relationships || [];
+        const name = props.name || '#' + intel.id;
+        const labels = (detail.labels || intel.labels || []).join(', ');
+        const labelMap = {Entity:'实体',Individual:'单兵',Class:'装备',Property:'属性',Patrol:'巡逻',Type:'类型'};
+        const labelCN = labels.split(',').map(l => labelMap[l.trim()] || l.trim()).join(' · ');
+
+        // 属性表
+        const keyFields = ['name','code','type','status','command_side','confidence','speed','power','duration','priority','domain','description','source','owner'];
+        const propRows = keyFields.filter(k => props[k] != null).map(k => {
+            let v = props[k];
+            if (k === 'command_side') v = ({0:'红方',1:'蓝方',2:'中立',3:'不确定'})[v] || v;
+            if (typeof v === 'object') v = JSON.stringify(v);
+            return `<tr><td style="color:var(--accent);">${k}</td><td>${String(v)}</td></tr>`;
+        }).join('');
+
+        // 关系列表
+        const relRows = rels.map(r => {
+            const rtype = r.type || '—';
+            const target = r.target_labels?.join(',') || '—';
+            return `<tr><td style="color:#f59e0b;">${rtype}</td><td>#${r.target_id}</td><td>${target}</td></tr>`;
+        }).join('');
+
+        document.getElementById('intelMain').innerHTML = `
+            <div class="intel-detail-header">
+                <h1>${name}</h1>
+                <div class="meta">ID: ${intel.id} · ${labelCN}</div>
+                <div class="tags">
+                    <span class="intel-tag">${props.code || '无编码'}</span>
+                    <span class="intel-tag">${props.status || '—'}</span>
+                    <span class="intel-tag">${props.domain || '—'}</span>
+                </div>
+            </div>
+            <div class="intel-section">
+                <h3><span class="dot"></span> 核心属性</h3>
+                <table class="ot-prop-table">
+                    <thead><tr><th>字段</th><th>值</th></tr></thead>
+                    <tbody>${propRows || '<tr><td colspan="2" style="color:var(--text-dim);">无</td></tr>'}</tbody>
+                </table>
+            </div>
+            <div class="intel-section">
+                <h3><span class="dot"></span> 关联关系 (${rels.length})</h3>
+                <table class="ot-prop-table">
+                    <thead><tr><th>关系类型</th><th>目标ID</th><th>目标类型</th></tr></thead>
+                    <tbody>${relRows || '<tr><td colspan="3" style="color:var(--text-dim);">无</td></tr>'}</tbody>
+                </table>
+            </div>`;
+        document.getElementById('intelMain').scrollTop = 0;
+    } catch(e) {
+        document.getElementById('intelMain').innerHTML =
+            `<div class="intel-detail-header"><h1>加载失败</h1></div>
+            <div style="color:#ef4444;">${e.message}</div>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadIntels);
+</script>
+{% endblock %}

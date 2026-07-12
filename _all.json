@@ -1,0 +1,413 @@
+{
+  "ontol_model": [
+    {
+      "id": "M_ROOT",
+      "ontol_parent_id": null,
+      "ontol_name": "通用父本体",
+      "ontol_model_type": "M",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "所有本体模型的根节点"
+    },
+    {
+      "id": "M_ENTITY",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "实体",
+      "ontol_model_type": "M1",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "可独立存在的物理或逻辑实体"
+    },
+    {
+      "id": "M_BEHAVIOR",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "行为",
+      "ontol_model_type": "M2",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "实体可执行的动作或操作"
+    },
+    {
+      "id": "M_RULE",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "规则",
+      "ontol_model_type": "M3",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "约束、推理规则与业务逻辑"
+    },
+    {
+      "id": "M_SCENE",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "场景",
+      "ontol_model_type": "M4",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "实体行为发生的时空上下文"
+    },
+    {
+      "id": "M_AGENT",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "主体",
+      "ontol_model_type": "M5",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "具有自主决策能力的智能体"
+    },
+    {
+      "id": "M_EXCEPTION",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "异常补偿",
+      "ontol_model_type": "M6",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "异常处理与补偿回滚机制"
+    },
+    {
+      "id": "M_QUALITY",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "质量约束",
+      "ontol_model_type": "M7",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "数据质量校验约束与度量"
+    },
+    {
+      "id": "M_AGGR",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "聚合本体",
+      "ontol_model_type": "M8",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "专门进行多维度计算的本体"
+    },
+    {
+      "id": "M_EVENT",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "事件",
+      "ontol_model_type": "ME",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "本体中发生的状态变化事件"
+    },
+    {
+      "id": "M_TEMPLATE",
+      "ontol_parent_id": "M_ROOT",
+      "ontol_name": "模板",
+      "ontol_model_type": "MT",
+      "ontol_model_status": "0",
+      "ontol_model_desc": "可复用的本体模板定义"
+    }
+  ],
+  "ontol_model_attr": [
+    {
+      "attr_order": 1,
+      "attr_code": "id",
+      "attr_name": "技术主键",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "50",
+      "attr_required": "1",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "图全局唯一，静态"
+    },
+    {
+      "attr_order": 2,
+      "attr_code": "unit_id",
+      "attr_name": "关联业务主键",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "50",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "mysql绑定持久化数据的唯一主键"
+    },
+    {
+      "attr_order": 3,
+      "attr_code": "graph_id",
+      "attr_name": "硬盘图主键",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "50",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "neo4j内存图的主键"
+    },
+    {
+      "attr_order": 4,
+      "attr_code": "domain",
+      "attr_name": "领域",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "50",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "领域ID，业务领域划分，给算法用的"
+    },
+    {
+      "attr_order": 5,
+      "attr_code": "leven",
+      "attr_name": "层级",
+      "attr_data_type": "INTEGER",
+      "attr_length": "4",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": "L0",
+      "attr_desc": "本体层级L0-L5，给算法用的"
+    },
+    {
+      "attr_order": 6,
+      "attr_code": "code",
+      "attr_name": "编码",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "100",
+      "attr_required": "1",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "业务编码"
+    },
+    {
+      "attr_order": 7,
+      "attr_code": "name",
+      "attr_name": "名称",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "200",
+      "attr_required": "1",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "名称"
+    },
+    {
+      "attr_order": 8,
+      "attr_code": "type",
+      "attr_name": "类型",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "4",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "类型，存的是本体类型代码(M1-M7)"
+    },
+    {
+      "attr_order": 9,
+      "attr_code": "update_time",
+      "attr_name": "更新时间",
+      "attr_data_type": "DATETIME",
+      "attr_length": "到秒即可",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "neo4j默认支持的时间格式"
+    },
+    {
+      "attr_order": 10,
+      "attr_code": "create_time",
+      "attr_name": "创建时间",
+      "attr_data_type": "DATETIME",
+      "attr_length": "到秒即可",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "neo4j默认支持的时间格式"
+    },
+    {
+      "attr_order": 11,
+      "attr_code": "confidence",
+      "attr_name": "置信度",
+      "attr_data_type": "FLOAT",
+      "attr_length": "4",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "百分数，如果没有按照默认的80%处理"
+    },
+    {
+      "attr_order": 12,
+      "attr_code": "description",
+      "attr_name": "描述",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": ""
+    },
+    {
+      "attr_order": 13,
+      "attr_code": "status",
+      "attr_name": "状态",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "4",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "枚举值：有效/无效"
+    },
+    {
+      "attr_order": 14,
+      "attr_code": "version",
+      "attr_name": "数据版本",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "32",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "示例v1.0,提交更新大版本，保存更新小版本"
+    },
+    {
+      "attr_order": 15,
+      "attr_code": "cope_version",
+      "attr_name": "副本版本",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "32",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "推演环境的副本版本"
+    },
+    {
+      "attr_order": 16,
+      "attr_code": "source",
+      "attr_name": "来源",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "50",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": ""
+    },
+    {
+      "attr_order": 17,
+      "attr_code": "owner",
+      "attr_name": "维护人员",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "50",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "所属人，责任人"
+    },
+    {
+      "attr_order": 18,
+      "attr_code": "hasPrecondition",
+      "attr_name": "触发前约束",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "SHACL执行语言为True以及什么都没写时可执行其他属性的函数，返回值为false时，这个节点的其他函数都不执行了，直接停止"
+    },
+    {
+      "attr_order": 19,
+      "attr_code": "hasEffect",
+      "attr_name": "效果",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "语言触发"
+    },
+    {
+      "attr_order": 20,
+      "attr_code": "hasCost",
+      "attr_name": "消耗",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "当触发前约束通过的时候，就执行这个函数"
+    },
+    {
+      "attr_order": 21,
+      "attr_code": "hasDuration",
+      "attr_name": "持续时间",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "秒，时序，用来做执行不同的节点用的时间排序，当执行完成了才会触发效果，未写默认0，秒出"
+    },
+    {
+      "attr_order": 22,
+      "attr_code": "hasPriority",
+      "attr_name": "优先级",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "从0到10级，冲突的时候，优先级高的先行，10级最高，未写默认0"
+    },
+    {
+      "attr_order": 23,
+      "attr_code": "isComposedOf",
+      "attr_name": "其他行为组合",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "可以写多个，跳到其他本体对象去,格式是ID或名称，用分号隔离"
+    },
+    {
+      "attr_order": 24,
+      "attr_code": "synonym",
+      "attr_name": "同义词",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "同义词，增加检索准确性"
+    },
+    {
+      "attr_order": 25,
+      "attr_code": "queryVariant",
+      "attr_name": "错意词",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "500",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "大家容易输错的词或者拼写"
+    },
+    {
+      "attr_order": 26,
+      "attr_code": "desc",
+      "attr_name": "描述",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "255",
+      "attr_required": "0",
+      "attr_is_system": "0",
+      "attr_default_value": null,
+      "attr_desc": "基本本体描述"
+    },
+    {
+      "attr_order": 28,
+      "attr_code": "graph_zone",
+      "attr_name": "图转换区",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "10",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "图转换区标识，用于图数据库转换时的分区标记"
+    },
+    {
+      "attr_order": 29,
+      "attr_code": "is_graph_index",
+      "attr_name": "是否图索引",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "10",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "是否作为图索引节点: id/code/name/synonym/queryVariant=是"
+    },
+    {
+      "attr_order": 30,
+      "attr_code": "remark",
+      "attr_name": "备注",
+      "attr_data_type": "VARCHAR",
+      "attr_length": "2000",
+      "attr_required": "0",
+      "attr_is_system": "1",
+      "attr_default_value": null,
+      "attr_desc": "备注信息，2000字以内"
+    }
+  ]
+}

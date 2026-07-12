@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block title %}态势总览 — OntoL{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.st-layout {
+    display: flex;
+    height: calc(100vh - 60px);
+    position: relative;
+    z-index: 1;
+}
+
+/* ---- 态势画布 ---- */
+.st-canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(ellipse at 30% 40%, rgba(0,212,255,0.04) 0%, transparent 60%),
+        linear-gradient(180deg, #070b24 0%, #0a0e27 100%);
+}
+.st-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* ---- 右侧信息面板 ---- */
+.st-panel {
+    width: 340px;
+    min-width: 340px;
+    background: rgba(8, 12, 32, 0.96);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.st-panel-header {
+    padding: 1rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.st-panel-header h3 {
+    font-size: 0.95rem;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.st-panel-header h3 .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--primary-glow);
+}
+
+.st-stats { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-dim); }
+.st-stats b { color: var(--accent); }
+
+.st-panel-body { flex: 1; overflow-y: auto; padding: 0.8rem 1.2rem; }
+.st-panel-body::-webkit-scrollbar { width: 4px; }
+.st-panel-body::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 2px; }
+
+.st-entity { padding: 0.6rem 0.8rem; margin-bottom: 0.4rem; border-left: 3px solid var(--accent); background: rgba(0,212,255,0.04); border-radius: 4px; cursor: pointer; transition: all 0.15s; font-size: 0.8rem; }
+.st-entity:hover { background: rgba(0,212,255,0.1); }
+.st-entity.side-red  { border-left-color: #ef4444; }
+.st-entity.side-blue { border-left-color: #3b82f6; }
+.st-entity .name { font-weight: 600; }
+.st-entity .meta { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.1rem; }
+
+.st-panel-footer {
+    padding: 0.6rem 1.2rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+/* 加载动画 */
+.st-loading {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; color: var(--text-dim); gap: 0.6rem;
+}
+.st-spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="st-layout">
+    <!-- 左侧：态势画布 -->
+    <div class="st-canvas-wrap" id="stCanvasWrap">
+        <canvas id="stCanvas"></canvas>
+    </div>
+
+    <!-- 右侧：实体列表 -->
+    <aside class="st-panel">
+        <div class="st-panel-header">
+            <h3><span class="dot"></span> 兵力编成</h3>
+            <div class="st-stats">
+                <span>🔵 蓝方: <b id="blueCnt">-</b></span>
+                <span>🔴 红方: <b id="redCnt">-</b></span>
+                <span>📦 总计: <b id="totalCnt">-</b></span>
+            </div>
+        </div>
+        <div class="st-panel-body" id="stEntityList">
+            <div class="st-loading"><div class="st-spinner"></div>加载中...</div>
+        </div>
+        <div class="st-panel-footer">
+            <span id="stFooter">态势更新中...</span>
+        </div>
+    </aside>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ====================================================================
+// API
+// ====================================================================
+const API = '/api/v1/ontology';
+async function ontApi(path) {
+    const r = await fetch(API + path);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    return r.json();
+}
+
+// ====================================================================
+// 态势数据
+// ====================================================================
+let entities = [];          // Entity 节点
+let patrols = [];           // Patrol 节点
+let relationships = [];     // 移动关系
+
+const SIDE_COLORS = { 0: '#ef4444', 1: '#3b82f6', 2: '#f59e0b', 3: '#9ca18c' };
+const SIDE_LABELS = { 0: '红方', 1: '蓝方', 2: '中立', 3: '未知' };
+
+async function loadData() {
+    try {
+        const [ents, pats] = await Promise.all([
+            ontApi('/nodes?label=Entity&limit=500'),
+            ontApi('/nodes?label=Patrol&limit=200'),
+        ]);
+        entities = ents;
+        patrols = pats;
+        // 收集关系
+        for (const e of entities) {
+            if (e.relationships) {
+                for (const r of e.relationships) {
+                    relationships.push({ sourceId: e.id, targetId: r.target_id, type: r.type });
+                }
+            }
+        }
+        renderAll();
+    } catch(e) {
+        document.getElementById('stCanvas').style.display = 'none';
+        document.getElementById('stEntityList').innerHTML = `<div style="color:#ef4444;">❌ ${e.message}</div>`;
+    }
+}
+
+function renderAll() {
+    drawSituation();
+    renderSidebar();
+    updateStats();
+}
+
+// ====================================================================
+// Canvas 态势图绘制
+// ====================================================================
+const canvas = document.getElementById('stCanvas');
+const wrap = document.getElementById('stCanvasWrap');
+
+function resizeCanvas() {
+    canvas.width = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+    drawSituation();
+}
+
+window.addEventListener('resize', resizeCanvas);
+
+function drawSituation() {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // 背景
+    ctx.fillStyle = '#070b24';
+    ctx.fillRect(0, 0, W, H);
+
+    // 坐标范围
+    const margin = 60;
+    const mapX = margin;
+    const mapY = margin;
+    const mapW = W - margin * 2 - 60;
+    const mapH = H - margin * 2;
+    const centerLat = 23.0;
+    const centerLon = 12.5;
+    const latRange = 4.0;   // 纬度跨度
+    const lonRange = 5.0;   // 经度跨度
+
+    // ---- 海域渐变 ----
+    const seaGrad = ctx.createLinearGradient(mapX, mapY, mapX + mapW, mapY + mapH);
+    seaGrad.addColorStop(0, 'rgba(0,212,255,0.06)');
+    seaGrad.addColorStop(0.5, 'rgba(0,50,100,0.08)');
+    seaGrad.addColorStop(1, 'rgba(0,212,255,0.04)');
+    ctx.fillStyle = seaGrad;
+    ctx.fillRect(mapX, mapY, mapW, mapH);
+
+    // ---- 网格线 ----
+    const gridStep = 5;
+    ctx.strokeStyle = 'rgba(0,212,255,0.08)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= gridStep; i++) {
+        const x = mapX + (i / gridStep) * mapW;
+        const y = mapY + (i / gridStep) * mapH;
+        ctx.beginPath();
+        ctx.moveTo(x, mapY); ctx.lineTo(x, mapY + mapH); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(mapX, y); ctx.lineTo(mapX + mapW, y); ctx.stroke();
+    }
+
+    // ---- 经纬度刻度 (每 0.5°) ----
+    ctx.fillStyle = 'rgba(137,146,176,0.3)';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 8; i++) {
+        const lat = centerLat + latRange/2 - i * (latRange/8);
+        const y = mapY + (i / 8) * mapH;
+        ctx.fillText(lat.toFixed(1) + '°', mapX - 30, y + 3);
+    }
+    ctx.textAlign = 'left';
+    for (let i = 0; i <= 10; i++) {
+        const lon = centerLon - lonRange/2 + i * (lonRange/10);
+        const x = mapX + (i / 10) * mapW;
+        ctx.fillText(lon.toFixed(1) + '°', x + 3, mapY + mapH + 16);
+    }
+
+    // ---- 海岸线示意 ----
+    ctx.strokeStyle = 'rgba(0,212,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mapX, mapY + mapH * 0.15);
+    ctx.quadraticCurveTo(mapX + mapW * 0.3, mapY - 20, mapX + mapW * 0.55, mapY + mapH * 0.1);
+    ctx.quadraticCurveTo(mapX + mapW * 0.7, mapY + mapH * 0.05, mapX + mapW, mapY + mapH * 0.25);
+    ctx.stroke();
+
+    // ---- 标尺 (左上) ----
+    const scaleX = mapX + 20;
+    const scaleY = mapY + 20;
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(scaleX, scaleY); ctx.lineTo(scaleX + 80, scaleY); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(scaleX, scaleY - 4); ctx.lineTo(scaleX, scaleY + 4); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(scaleX + 80, scaleY - 4); ctx.lineTo(scaleX + 80, scaleY + 4); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('≈ 200 nm', scaleX + 40, scaleY - 6);
+
+    // ---- 绘制实体 ----
+    const legendItems = [];
+
+    entities.forEach(e => {
+        const props = e.properties || {};
+        const lat = (props.Space_abs?.[0] || centerLat) + (Math.random() - 0.5) * 1.0;
+        const lon = (props.Space_abs?.[1] || centerLon) + (Math.random() - 0.5) * 1.5;
+        const side = props.command_side ?? 1;
+        const color = SIDE_COLORS[side] || '#9ca18c';
+        const status = props.status || '有效';
+        const name = props.name || '#' + e.id;
+        const code = props.code || '';
+        const type = props.type || '';
+
+        // 经纬度 → 像素
+        const px = mapX + ((lon - (centerLon - lonRange/2)) / lonRange) * mapW;
+        const py = mapY + (((centerLat + latRange/2) - lat) / latRange) * mapH;
+
+        if (px < mapX - 20 || px > mapX + mapW + 20 || py < mapY - 20 || py > mapY + mapH + 20) return;
+
+        // 实体大头针
+        const size = (type || code ? 7 : 5);
+
+        // 光晕
+        const glow = ctx.createRadialGradient(px, py, 0, px, py, 14);
+        glow.addColorStop(0, color.replace(')', ',0.3)').replace('rgb', 'rgba'));
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(px, py, 14, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 主体
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(px, py - 9);
+        ctx.lineTo(px + 7, py + 6);
+        ctx.lineTo(px, py + 3);
+        ctx.lineTo(px - 7, py + 6);
+        ctx.closePath();
+        ctx.fill();
+
+        // 中心点
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 标签
+        if (name) {
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(name.substring(0, 12), px, py + 18);
+        }
+
+        // 记录用于图例
+        legendItems.push({ name, code, color, side, status });
+    });
+
+    // ---- 图例 (左下) ----
+    const lx = mapX + 10;
+    const ly = mapY + mapH - 10;
+    ctx.fillStyle = 'rgba(8,12,32,0.85)';
+    ctx.fillRect(lx, ly - 60, 110, 72);
+    ctx.strokeStyle = 'rgba(0,212,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(lx, ly - 60, 110, 72);
+    ctx.font = '9px sans-serif';
+    const legend = [
+        { label: '蓝方', color: '#3b82f6' },
+        { label: '红方', color: '#ef4444' },
+        { label: '中立', color: '#f59e0b' },
+    ];
+    legend.forEach((l, i) => {
+        const y = ly - 52 + i * 18;
+        ctx.fillStyle = l.color;
+        ctx.beginPath();
+        ctx.arc(lx + 12, y + 4, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.textAlign = 'left';
+        ctx.fillText(l.label, lx + 22, y + 7);
+    });
+}
+
+// ====================================================================
+// 右侧面板
+// ====================================================================
+function renderSidebar() {
+    const list = document.getElementById('stEntityList');
+    // 按 command_side 分组
+    const red = entities.filter(e => e.properties?.command_side === 0);
+    const blue = entities.filter(e => e.properties?.command_side === 1);
+    const other = entities.filter(e => !([0,1].includes(e.properties?.command_side)));
+
+    const renderGroup = (title, items, color) => {
+        if (items.length === 0) return '';
+        return `<div style="margin-bottom:1rem;">
+            <div style="font-size:0.7rem;color:${color};text-transform:uppercase;letter-spacing:1px;margin-bottom:0.3rem;">${title} · ${items.length}</div>
+            ${items.slice(0, 30).map(e => {
+                const name = e.properties?.name || '#' + e.id;
+                const code = e.properties?.code || '';
+                const status = e.properties?.status || '—';
+                const side = e.properties?.command_side ?? 1;
+                const cls = side === 0 ? 'side-red' : 'side-blue';
+                return `<div class="st-entity ${side === 0 ? 'side-red' : 'side-blue'}">
+                    <div class="name">${name}</div>
+                    <div class="meta">${code} · ${status}</div>
+                </div>`;
+            }).join('')}
+        </div>`;
+    };
+
+    list.innerHTML =
+        renderGroup('🔴 红方兵力', red, '#ef4444') +
+        renderGroup('🔵 蓝方兵力', blue, '#3b82f6') +
+        renderGroup('⚪ 其他', other, '#9ca18c') +
+        (entities.length === 0 ? '<div style="color:var(--text-dim);padding:1rem;text-align:center;">无数据</div>' : '');
+}
+
+function updateStats() {
+    const red = entities.filter(e => e.properties?.command_side === 0).length;
+    const blue = entities.filter(e => e.properties?.command_side === 1).length;
+    document.getElementById('blueCnt').textContent = blue;
+    document.getElementById('redCnt').textContent = red;
+    document.getElementById('totalCnt').textContent = entities.length;
+    document.getElementById('stFooter').textContent =
+        `态势更新: ${new Date().toLocaleTimeString()} · ${entities.length} 实体 · ${relationships.length} 关系`;
+}
+
+// ====================================================================
+// 初始化
+// ====================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    resizeCanvas();
+    loadData();
+    // 每 30 秒刷新
+    setInterval(loadData, 30000);
+});
+</script>
+{% endblock %}

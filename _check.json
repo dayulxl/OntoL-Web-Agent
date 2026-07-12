@@ -1,0 +1,62 @@
+[
+  {
+    "id": "M_ROOT",
+    "ontol_name": "通用父本体",
+    "ontol_model_type": "M"
+  },
+  {
+    "id": "M_BASE_ONTOLOGY",
+    "ontol_name": "基本本体",
+    "ontol_model_type": "M0"
+  },
+  {
+    "id": "M_ENTITY",
+    "ontol_name": "实体",
+    "ontol_model_type": "M1"
+  },
+  {
+    "id": "M_BEHAVIOR",
+    "ontol_name": "行为",
+    "ontol_model_type": "M2"
+  },
+  {
+    "id": "M_RULE",
+    "ontol_name": "规则",
+    "ontol_model_type": "M3"
+  },
+  {
+    "id": "M_SCENE",
+    "ontol_name": "场景",
+    "ontol_model_type": "M4"
+  },
+  {
+    "id": "M_AGENT",
+    "ontol_name": "主体",
+    "ontol_model_type": "M5"
+  },
+  {
+    "id": "M_EXCEPTION",
+    "ontol_name": "异常补偿",
+    "ontol_model_type": "M6"
+  },
+  {
+    "id": "M_QUALITY",
+    "ontol_name": "质量约束",
+    "ontol_model_type": "M7"
+  },
+  {
+    "id": "M_AGGR",
+    "ontol_name": "聚合本体",
+    "ontol_model_type": "M8"
+  },
+  {
+    "id": "M_EVENT",
+    "ontol_name": "事件",
+    "ontol_model_type": "ME"
+  },
+  {
+    "id": "M_TEMPLATE",
+    "ontol_name": "模板",
+    "ontol_model_type": "MT"
+  }
+]

@@ -1,0 +1,250 @@
+/* LangGraph Cluster — 深蓝科技风样式 */
+:root {
+    --primary: #00d4ff;
+    --primary-glow: rgba(0, 212, 255, 0.3);
+    --bg-deep: #0a0e27;
+    --bg-mid: #111640;
+    --bg-card: rgba(17, 24, 72, 0.85);
+    --text: #e8ecf4;
+    --text-dim: #8892b0;
+    --border: rgba(0, 212, 255, 0.15);
+    --border-glow: rgba(0, 212, 255, 0.4);
+    --accent: #00d4ff;
+    --accent2: #7c3aed;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    background:
+        radial-gradient(ellipse at 20% 20%, rgba(0, 212, 255, 0.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(124, 58, 237, 0.05) 0%, transparent 50%),
+        linear-gradient(180deg, #070b24 0%, #0a0e27 30%, #0d1235 60%, #0a0e27 100%);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* ---- 科技网格背景 ---- */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image:
+        linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ---- 导航栏 ---- */
+.navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2rem;
+    height: 60px;
+    background: linear-gradient(180deg, rgba(10, 15, 40, 0.98), rgba(10, 15, 40, 0.92));
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 1px 20px rgba(0, 212, 255, 0.08);
+}
+
+.navbar a {
+    color: var(--text-dim);
+    text-decoration: none;
+    margin-left: 1.2rem;
+    font-size: 0.9rem;
+    transition: color 0.2s, text-shadow 0.2s;
+    position: relative;
+}
+
+.navbar a:hover {
+    color: var(--accent);
+    text-shadow: 0 0 8px var(--primary-glow);
+}
+
+.navbar a.active {
+    color: var(--accent);
+    text-shadow: 0 0 10px var(--primary-glow);
+    font-weight: 600;
+}
+
+.navbar a.active::after {
+    content: "";
+    position: absolute;
+    bottom: -4px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+    box-shadow: 0 0 8px var(--primary-glow);
+}
+
+.navbar a.brand {
+    font-weight: 800;
+    font-size: 1.15rem;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 12px var(--primary-glow);
+}
+
+/* ---- 主容器 ---- */
+.container {
+    max-width: 1100px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    position: relative;
+    z-index: 1;
+}
+
+/* ---- 卡片 ---- */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.card:hover {
+    border-color: var(--border-glow);
+    box-shadow: 0 4px 32px rgba(0, 212, 255, 0.08);
+}
+
+/* ---- 标题 ---- */
+h1, h2, h3 {
+    color: #fff;
+    font-weight: 700;
+}
+
+h1 {
+    font-size: 1.8rem;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 1rem;
+}
+
+h2 { font-size: 1.35rem; margin-bottom: 0.75rem; }
+h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+
+/* ---- 表格 ---- */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.5rem;
+    background: var(--bg-card);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+th, td {
+    padding: 0.85rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    background: rgba(0, 212, 255, 0.08);
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+tr:hover td {
+    background: rgba(0, 212, 255, 0.03);
+}
+
+/* ---- 链接 ---- */
+a { color: var(--accent); }
+a:hover { text-shadow: 0 0 6px var(--primary-glow); }
+
+/* ---- 按钮 ---- */
+button, .btn {
+    display: inline-block;
+    padding: 0.6rem 1.4rem;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: rgba(0, 212, 255, 0.1);
+    color: var(--accent);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+button:hover, .btn:hover {
+    background: rgba(0, 212, 255, 0.2);
+    box-shadow: 0 0 16px var(--primary-glow);
+}
+
+/* ---- 表单 ---- */
+input, textarea, select {
+    background: rgba(10, 15, 40, 0.8);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 0.6rem 0.8rem;
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: border-color 0.2s;
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--primary-glow);
+}
+
+/* ---- 页脚 ---- */
+footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid var(--border);
+    margin-top: 3rem;
+}
+
+/* ---- 占位页面 ---- */
+.placeholder-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 50vh;
+    text-align: center;
+}
+
+.placeholder-page .icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.placeholder-page p {
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+}
+
+/* ---- 科技装饰线 ---- */
+.tech-line {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    margin: 2rem 0;
+    opacity: 0.3;
+}

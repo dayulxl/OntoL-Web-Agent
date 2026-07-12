@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LangGraph Cluster{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/main.css') }}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    {% include "components/navbar.html" %}
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>OntoL &copy; 2026</p>
+    </footer>
+
+    {% block extra_scripts %}{% endblock %}
+    <script>
+    // 导航菜单高亮
+    (function() {
+        var path = window.location.pathname;
+        var links = document.querySelectorAll('.nav-links a');
+        var best = null, bestLen = 0;
+        links.forEach(function(a) {
+            var href = a.getAttribute('href');
+            if (href === '/') {
+                if (path === '/' || path === '') best = a;
+            } else if (path.startsWith(href) && href.length > bestLen) {
+                best = a; bestLen = href.length;
+            }
+        });
+        if (best) best.classList.add('active');
+    })();
+    </script>
+</body>
+</html>
