@@ -389,7 +389,8 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_function (
             id                  TEXT PRIMARY KEY,
-            function_name       TEXT    NOT NULL,
+            function_code       TEXT    NOT NULL,
+            function_name       TEXT    NOT NULL DEFAULT '',
             function_classpath  TEXT,
             function_method     TEXT,
             function_type       TEXT    NOT NULL DEFAULT 'PYTHON',
@@ -405,11 +406,21 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         )
     """)
     _conn._exec(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ofunc_name_active "
-        "ON ontol_function(function_name) WHERE delete_flag = '0'"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ofunc_code_active "
+        "ON ontol_function(function_code) WHERE delete_flag = '0'"
     )
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_del ON ontol_function(delete_flag)")
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_ofunc_type ON ontol_function(function_type)")
+
+    # 迁移：ontol_function 旧表 function_name → function_code
+    of_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_function')")]
+    if "function_code" not in of_cols and "function_name" in of_cols:
+        try:
+            _conn._exec("ALTER TABLE ontol_function RENAME COLUMN function_name TO function_code")
+        except Exception:
+            pass  # SQLite < 3.25 fallback — 表刚创建无需迁移
+    if "function_name" not in of_cols:
+        _conn._exec("ALTER TABLE ontol_function ADD COLUMN function_name TEXT NOT NULL DEFAULT ''")
 
     # 迁移：删除已存在的 llm_type 列，添加 is_system 列
     oltc_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_llm_type_config')")]
@@ -423,7 +434,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     if "attr_order" not in oma_cols:
         _conn._exec("ALTER TABLE ontol_model_attr ADD COLUMN attr_order INTEGER NOT NULL DEFAULT 0")
 
-    # ── 迁移：标准化通用字段 (id/create_time/create_user/update_time/update_user/delete_flag) ──
+    # ── 迁移：标准化通用字段 (id/create_time/create_user/update_time/update_user/delete_flag/is_system) ──
     _MIGRATE_TABLES = [
         "ontol_model",
         "ontol_model_attr",
@@ -449,6 +460,8 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN update_user TEXT NOT NULL DEFAULT ''")
         if "delete_flag" not in cols:
             _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN delete_flag TEXT NOT NULL DEFAULT '0'")
+        if "is_system" not in cols:
+            _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN is_system TEXT NOT NULL DEFAULT '0'")
     logger.info("Standard column migration complete", tables=len(_MIGRATE_TABLES))
 
     # ------------------------------------------------------------------

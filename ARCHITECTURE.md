@@ -454,7 +454,7 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 
 ### 8.2 表设计约束规范 🆕
 
-> ⚠️ **核心约束**：所有 SQLite 表（`ontol_*`）在建表时 **必须** 包含以下 6 个通用字段。如果建表语句缺少任一字段，必须自动补上。
+> ⚠️ **核心约束**：所有 SQLite 表（`ontol_*`）在建表时 **必须** 包含以下 7 个通用字段。如果建表语句缺少任一字段，必须自动补上。
 
 #### 8.2.1 通用字段定义
 
@@ -466,6 +466,7 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 | `update_time` | TEXT / DATETIME | NOT NULL, DEFAULT `''` | 记录最后更新时间，每次更新由后端自动刷新为当前时间 |
 | `update_user` | TEXT / VARCHAR(64) | NOT NULL, DEFAULT `''` | 记录最后更新人标识，每次更新由后端自动刷新 |
 | `delete_flag` | TEXT / TINYINT | NOT NULL, DEFAULT `'0'` | 逻辑删除标志（`'0'`-未删除，`'1'`-已删除），物理删除禁止 |
+| `is_system` | TEXT / TINYINT | NOT NULL, DEFAULT `'0'` | 系统预设标志（`'0'`-自定义，`'1'`-系统预设，不可删除不可修改） |
 
 #### 8.2.2 标准 DDL 模板
 
@@ -477,7 +478,8 @@ CREATE TABLE IF NOT EXISTS ontol_xxx (
     create_user     TEXT NOT NULL DEFAULT '',
     update_time     TEXT NOT NULL DEFAULT '',
     update_user     TEXT NOT NULL DEFAULT '',
-    delete_flag     TEXT NOT NULL DEFAULT '0'
+    delete_flag     TEXT NOT NULL DEFAULT '0',
+    is_system       TEXT NOT NULL DEFAULT '0'
 );
 ```
 

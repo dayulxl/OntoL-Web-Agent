@@ -69,7 +69,7 @@ class OntolModelAttrCreateBody(BaseModel):
     ontol_model_id: Optional[str] = Field(None, max_length=32)
     attr_name: str = Field(..., max_length=50)
     attr_code: str = Field(..., max_length=50)
-    attr_data_type: str = Field("0", max_length=2)
+    attr_data_type: str = Field("VARCHAR", max_length=20)
     attr_length: Optional[str] = Field(None, max_length=10)
     attr_digit: Optional[str] = Field(None, max_length=10)
     attr_is_only: Optional[str] = Field("0", max_length=2)
@@ -86,7 +86,7 @@ class OntolModelAttrUpdateBody(BaseModel):
 
     attr_name: Optional[str] = Field(None, max_length=50)
     attr_code: Optional[str] = Field(None, max_length=50)
-    attr_data_type: Optional[str] = Field(None, max_length=2)
+    attr_data_type: Optional[str] = Field(None, max_length=20)
     attr_length: Optional[str] = Field(None, max_length=10)
     attr_digit: Optional[str] = Field(None, max_length=10)
     attr_is_only: Optional[str] = Field(None, max_length=2)
@@ -247,11 +247,32 @@ async def get_node(node_id: int, graph=Depends(get_graph)):
 
 @router.post("/ontology/nodes", status_code=201)
 async def create_node(body: NodeCreate, graph=Depends(get_graph)):
-    """创建节点。"""
+    """创建节点，自动生成雪花 ID（64 位纯数字）。"""
     try:
-        result = await graph.create_node(body.label, body.properties)
+        # 生成雪花 ID（去重）
+        import time as _time
+        sf = SnowflakeGenerator(
+            worker_id=(int(_time.time() * 1000) & 0x1F),
+            datacenter_id=1,
+        )
+        # 查询已存在的节点 ID，避免冲突
+        existing = await graph.execute_readonly_cypher("MATCH (n) WHERE n.id IS NOT NULL RETURN n.id AS id LIMIT 5000")
+        existing_ids = {r["id"] for r in existing if isinstance(r.get("id"), int)}
+        snowflake_id = sf.next_id()
+        while snowflake_id in existing_ids:
+            snowflake_id = sf.next_id()
+
+        props = dict(body.properties)
+        props.setdefault("id", snowflake_id)  # 雪花 ID 作为节点 id 属性
+        # 自动设置时间
+        from datetime import datetime as _dt
+        now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+        props.setdefault("create_time", now)
+        props["update_time"] = now
+
+        result = await graph.create_node(body.label, props)
         # 记录历史
-        await _record_history(str(result.get("id", "")), "create", {"label": body.label, "new_props": body.properties})
+        await _record_history(str(result.get("id", "")), "create", {"label": body.label, "new_props": props})
         return result
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Graph DB create failed: {e}")
@@ -265,6 +286,10 @@ async def update_node(node_id: int, body: NodeUpdate, graph=Depends(get_graph)):
         old_node = await graph.get_node(node_id)
         old_props = old_node["properties"] if old_node else {}
         new_props = body.properties
+
+        # 自动更新修改时间
+        from datetime import datetime as _dt
+        new_props["update_time"] = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 找出被删除的 key（旧有但新无）
         removed_keys = [k for k in old_props if k not in new_props]
@@ -471,6 +496,47 @@ async def search_ontology_models(
         return await temp.search(keyword, columns=["ontol_name", "ontol_model_desc"], where=where, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Search failed: {e}")
+
+
+@router.get("/ontology-models/types/flat")
+async def list_ontology_types_flat():
+    """获取所有本体类型扁平列表（供下拉框使用），含字段数。"""
+    types = _load_ontology_types()
+    result = []
+    for tid, t in types.items():
+        inherited = _get_inherited_fields(tid)
+        result.append({
+            "id": tid,
+            "name": t["name"],
+            "type_code": t["type_code"],
+            "parent_id": t["parent_id"],
+            "desc": t.get("desc", ""),
+            "field_count": len(inherited),
+        })
+    result.sort(key=lambda x: (x["type_code"] or "", x["name"]))
+    return result
+
+
+@router.get("/ontology-models/{model_id}/inherited-fields")
+async def get_model_inherited_fields(model_id: str):
+    """获取指定本体模型的完整字段列表（含继承链：M_ROOT → ... → 当前模型）。
+
+    子类型字段覆盖父类型同名字段，返回以 code 为键的字段列表。
+    """
+    from fastapi import HTTPException as _HTTPException
+    types = _load_ontology_types()
+    if model_id not in types:
+        raise _HTTPException(status_code=404, detail=f"本体模型不存在: {model_id}")
+    fields = _get_inherited_fields(model_id)
+    # 按 source 分组排序（M_ROOT 的字段在前，当前模型的在后）
+    sorted_fields = sorted(fields.values(), key=lambda f: (f.get("source_model", "") == model_id, f.get("order", 0), f.get("code", "")))
+    return {
+        "model_id": model_id,
+        "model_name": types[model_id]["name"],
+        "type_code": types[model_id]["type_code"],
+        "field_count": len(sorted_fields),
+        "fields": sorted_fields,
+    }
 
 
 @router.get("/ontology-models/{model_id}")
@@ -813,10 +879,10 @@ def _load_ontology_types() -> dict:
             md = dict(m)
             attrs = conn.execute(
                 """SELECT id, attr_name, attr_code, attr_data_type, attr_length,
-                          attr_required, attr_default_value, attr_desc
+                          attr_required, attr_default_value, attr_desc, attr_order
                    FROM ontol_model_attr
                    WHERE ontol_model_id=? AND delete_flag='0'
-                   ORDER BY attr_code""",
+                   ORDER BY attr_order, attr_code""",
                 (md["id"],),
             ).fetchall()
             types[md["id"]] = {
@@ -835,6 +901,7 @@ def _load_ontology_types() -> dict:
                         "required": a["attr_required"],
                         "default": a["attr_default_value"],
                         "desc": a["attr_desc"] or "",
+                        "order": a["attr_order"],
                     }
                     for a in attrs
                 ],
@@ -961,57 +1028,51 @@ def _validate_entities_for_import(entities: list[dict]) -> dict:
 def _build_ontology_prompt() -> str:
     """构建包含所有本体类型定义的 LLM 提示词。
 
-    规则：
-    - 排除 M_ROOT 自身，不参与分类
-    - 根节点字段是全局字段，所有本体类型继承
-    - 每个本体类型额外拥有自己的专属字段
-    - 关系语义使用 OWL2 DL，推理使用 SWRL
+    使用 _get_inherited_fields() 获取每个类型的完整继承字段（M_ROOT → 父链 → 自身），
+    确保 AI 看到的字段定义与 API 返回的继承字段一致。
     """
     types = _load_ontology_types()
     root_type = types.get("M_ROOT", {})
-    root_fields = root_type.get("fields", [])
     non_root = {tid: td for tid, td in types.items() if tid != "M_ROOT"}
 
     lines = []
     lines.append("你是一个本体建模专家。请解析文本，识别实体并归类到以下本体类型，填写所有字段。\n")
 
-    # ─── 1. 全局字段（继承自根节点）───
-    if root_fields:
-        la = "L0 全局字段" if root_type.get("name") else "全局公共字段"
-        lines.append(f"# {la}（所有本体类型共有）\n")
-        for f in root_fields:
+    # ─── 1. M_ROOT 根节点概览（所有类型的字段基础）───
+    root_inherited = _get_inherited_fields("M_ROOT") if "M_ROOT" in types else {}
+    if root_inherited:
+        lines.append(f"# M_ROOT 本体根节点 — {len(root_inherited)} 个基础字段（所有类型继承）\n")
+        for f in sorted(root_inherited.values(), key=lambda x: x.get("code", "")):
             lines.append(_fmt_field(f))
         lines.append("")
 
-    # ─── 2. 各本体类型 + 专属字段 ──
+    # ─── 2. 各本体类型 + 完整继承字段 ──
     lines.append("# 本体类型定义\n")
     for tid, tdef in non_root.items():
         lines.append(f"## {tdef.get('name','')} (ont_type={tid}, 类型代码={tdef.get('type_code','')})")
         lines.append(f"描述: {tdef.get('desc','')}")
 
-        own = tdef.get("fields", [])
-        lines.append(f"专属字段 ({len(own)} 个):")
-        if own:
-            for f in own:
-                lines.append(_fmt_field(f))
-        else:
-            lines.append("  无专属字段，仅使用 L0 全局字段")
+        # 用 _get_inherited_fields 获取完整字段（M_ROOT + 父链 + 自身）
+        all_fields = _get_inherited_fields(tid)
+        own_fields = [f for f in all_fields.values() if f.get("source_model") == tid]
+        inherited_from = [f for f in all_fields.values() if f.get("source_model") != tid]
+
+        lines.append(f"完整字段 ({len(all_fields)} 个归属, {len(inherited_from)} 个继承 + {len(own_fields)} 个归属):")
+        for f in sorted(all_fields.values(), key=lambda x: (x.get("source_model", "") == tid, x.get("order", 0), x.get("code", ""))):
+            src_tag = "" if f.get("source_model") == tid else f" [继承自 {f.get('source_name','')}]"
+            lines.append(_fmt_field(f) + src_tag)
         lines.append("")
 
     # ─── 3. 字段汇总表 ──
     lines.append("# 字段汇总\n")
-    lines.append("每个实体需要填写的字段 = L0 全局字段 + 该本体类型的专属字段。\n")
-    if root_fields:
-        rf_codes = [f.get("code", "") for f in root_fields]
-        lines.append(f"L0 全局字段（所有类型共有）: {', '.join(rf_codes)}")
+    lines.append("每个实体需填写的字段 = 该本体类型的完整继承字段列表（含 M_ROOT 基础字段）。\n")
     for tid, tdef in non_root.items():
-        own = tdef.get("fields", [])
-        all_codes = (root_fields or []) + own
-        codes = [f.get("code", "") for f in all_codes]
-        lines.append(f"{tdef['name']}: {', '.join(codes)}")
+        all_fields = _get_inherited_fields(tid)
+        codes = [f.get("code", "") for f in sorted(all_fields.values(), key=lambda x: x.get("code", ""))]
+        lines.append(f"{tdef['name']} ({tid}, 共{len(codes)}字段): {', '.join(codes)}")
     lines.append("")
 
-    # ─── 3.5. 本体类型枚举说明 ───
+    # ─── 4. 本体类型枚举说明 ──
     lines.append("""# 本体类型（Ontology Types）枚举说明
 
 在解析文本时，请根据实体的核心业务特征，将其归类为以下 7 种本体类型之一。注意：输出 JSON 时，`type` 字段的值必须严格使用以下指定的代码（如 M1、M2 等）：
@@ -1025,7 +1086,23 @@ def _build_ontology_prompt() -> str:
 
 """)
 
-    # ─── 5. 语义规范: OWL2 DL + SWRL + SHACL ──
+    # ─── 5. 动态生成输出示例 JSON（用第一个非 root 类型的字段）───
+    example_type = list(non_root.keys())[0] if non_root else None
+    example_fields = _get_inherited_fields(example_type) if example_type else {}
+    example_props_lines = []
+    if example_fields:
+        for f in sorted(example_fields.values(), key=lambda x: x.get("code", "")):
+            code = f.get("code", "")
+            name = f.get("name", "")
+            dtype = f.get("data_type", "VARCHAR")
+            default = f.get("default", "")
+            desc = f.get("desc", "")
+            dtype_hint = dtype
+            val_hint = default if default else (f"示例{name}" if dtype == "0" else "0")
+            example_props_lines.append(f'        "{code}": "{val_hint}",  // {name}, {dtype_hint}{", " + desc if desc else ""}')
+    example_props_json = "\n".join(example_props_lines) if example_props_lines else '        // (无定义字段)'
+
+    # ─── 6. 语义规范: OWL2 DL + SWRL + SHACL ──
     lines.append("""# 语义规范
 
 ## 前缀约定
@@ -1137,32 +1214,9 @@ queryVariant: "电话验证,号码检查"
       "ont_type": "M_ENTITY",
       "type_name": "实体",
       "properties": {
-        "id": "大模型随机生成",
-        "unit_id": "",
-        "graph_id": "",
-        "domain": "",
-        "leven": "",
-        "code": "业务编码(必填)，字符串100",
-        "name": "名称(必填)，字符串200",
-        "type": "本体类型代码，严格使用枚举值：M1 / M2 / M3 / M4 / M5 / M6 / M7，字符串4",
-        "update_time": "更新时间，openCypher 标准时间格式(如 LocalDateTime)，到秒即可",
-        "create_time": "创建时间，openCypher 标准时间格式(如 LocalDateTime)，到秒即可",
-        "confidence": "置信度，百分数，默认80%",
-        "description": "描述，字符串500",
-        "status": "状态，枚举值：有效/无效，字符串4",
-        "version": "数据版本，示例v1.0，提交更新大版本，保存更新小版本，字符串32",
-        "cope_version": "副本版本，推演环境的副本版本，字符串32",
-        "source": "来源，字符串50",
-        "owner": "维护人员/所属人/责任人，字符串50",
-        "hasPrecondition": "前置条件，使用SHACL语言，可为空",
-        "hasEffect": "执行效果描述",
-        "hasCost": "消耗，JSON格式如 {\\"name\\": \\"电\\", \\"type\\": \\"M1\\", \\"amount\\": 500, \\"unit\\": \\"kWh\\"}",
-        "hasDuration": "持续时间(秒)，用于时序执行排序，整数",
-        "hasPriority": "优先级，0-10级，10级最高，未写默认0",
-        "isComposedOf": "组合关系，可多个，用分号区分",
-        "synonym": "同义词，增加检索准确性，用分号隔离",
-        "queryVariant": "错意词，容易输错或拼写错误的词，用分号隔离"
-      }
+""")
+    lines.append(example_props_json)
+    lines.append("""      }
     }
   ],
   "relationships": [
@@ -1181,7 +1235,7 @@ queryVariant: "电话验证,号码检查"
 ## 重要规则
 1. 每个实体必须归类到一个 ont_type（从上面定义的本体类型中选择）
 2. 每个实体的 properties 中 `type` 字段必须填写 M1~M7 枚举值
-3. properties 必须包含 L0 全局字段 + 该类型专属字段，尽量从文本中提取
+3. properties 必须包含该类型的完整继承字段列表，尽量从文本中提取
 4. 关系 type 遵循 OWL2 DL 语义规范（带 owl2: 前缀）
 5. 如有推理规则，使用 SWRL 格式填入 hasPrecondition 或单独关系
 6. 如有校验约束，使用 SHACL 格式
@@ -1193,8 +1247,7 @@ def _fmt_field(f: dict) -> str:
     """格式化一个字段为提示词中的一行。"""
     req = "必填" if f.get("required", "0") == "1" else "可选"
     default = f"，默认值={f.get('default')}" if f.get("default") else ""
-    dtype = f.get("data_type", "0")
-    dtype_name = {"0": "字符串", "1": "数字", "2": "浮点数"}.get(dtype, dtype)
+    dtype_name = f.get("data_type", "VARCHAR")
     return f"  - {f.get('code','')} ({f.get('name','')}): {req}, {dtype_name}, 长度={f.get('length','—')}{default} — {f.get('desc','')}"
 
 
@@ -1299,10 +1352,78 @@ def _parse_entities_json(text: str) -> dict:
     }
 
 
+def _build_classify_prompt() -> str:
+    """构建分类提示词 — 仅让 LLM 判断实体归类，不涉及字段细节。"""
+    types = _load_ontology_types()
+    non_root = [(tid, td) for tid, td in types.items() if tid != "M_ROOT"]
+
+    lines = [
+        "你是一个本体建模专家。请解析文本，识别实体并归类到以下本体类型。",
+        "只需返回实体名称和本体类型，不需要填写属性字段。\n",
+        "# 本体类型枚举\n",
+    ]
+    for tid, tdef in non_root:
+        lines.append(f"- **{tdef.get('name','')}** (ont_type={tid}, type_code={tdef.get('type_code','')}): {tdef.get('desc','')}")
+
+    lines.append("""
+# 输出格式（严格 JSON，只输出此 JSON）
+```json
+{
+  "entities": [
+    {"name": "实体名称", "ont_type": "M_ENTITY"}
+  ],
+  "relationships": [
+    {"type": "关系类型", "start_node_id": "起始实体名", "end_node_id": "目标实体名"}
+  ]
+}
+```""")
+    return "\n".join(lines)
+
+
+def _build_extract_prompt(ont_type: str) -> str:
+    """构建字段提取提示词 — 仅针对单个本体类型，用 _get_inherited_fields 取完整字段。"""
+    t = _load_ontology_types().get(ont_type, {})
+    fields = _get_inherited_fields(ont_type)
+    type_name = t.get("name", ont_type)
+    type_code = t.get("type_code", "")
+
+    lines = [
+        f"你是本体建模专家。请为以下实体提取字段值，该实体类型为 **{type_name}** (ont_type={ont_type}, type_code={type_code})。",
+        f"\n# 需填写的字段（共 {len(fields)} 个，含继承字段）\n",
+    ]
+    for f in sorted(fields.values(), key=lambda x: (x.get("source_model", "") == ont_type, x.get("order", 0), x.get("code", ""))):
+        src = f" [继承自 {f['source_name']}]" if f.get("source_model") != ont_type else ""
+        lines.append(_fmt_field(f) + src)
+
+    lines.append("""
+# 输出格式（严格 JSON，只输出此 JSON）
+```json
+{
+  "entities": [
+    {
+      "name": "实体名称（与输入一致）",
+      "ont_type": \"""" + ont_type + """\",
+      "properties": {
+        "field_code": "从原文提取的值，无法提取则留空"
+      }
+    }
+  ]
+}
+```
+
+## 规则
+1. 每个字段尽量从原文推断，无法提取留空字符串 ""
+2. 字段值保持原文语义，不要臆造
+3. 置信度字段默认填 "80%"
+4. 只输出 JSON，不输出解释""")
+    return "\n".join(lines)
+
+
 @router.post("/upload/parse")
 async def parse_file_to_entities(body: ParseTriplesRequest):
     """
-    用大模型解析上传文件，识别本体类型并填充字段。
+    两阶段 AI 解析：先用分类提示词让 LLM 判定实体类型，
+    再按类型 ID 通过 _get_inherited_fields 取完整字段，让 LLM 提取字段值。
 
     返回按本体类型分类的实体列表和关系列表，供用户审核后导入图数据库。
     """
@@ -1340,55 +1461,36 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
         chunks.append(content[start:end].strip())
         start = end
 
-    all_entities: dict[str, dict] = {}  # name -> entity dict
+    valid_chunks = [c for c in chunks if c and len(c) >= 10]
+    chunk_errors: list[dict] = []
+
+    # =====================================================================
+    # 阶段 1: 分类 — LLM 判定每个实体的本体类型（轻量提示词，不含字段）
+    # =====================================================================
+    classify_prompt = _build_classify_prompt()
+    all_classified: dict[str, dict] = {}  # name -> {name, ont_type}
     all_relationships: list[dict] = []
     seen_rels = set()
-    chunk_errors: list[dict] = []       # 记录每块的错误，反馈到前端
-    total_chunks = sum(1 for c in chunks if c and len(c) >= 10)
-
-    onto_prompt = _build_ontology_prompt()
 
     for i, chunk in enumerate(chunks):
         if not chunk or len(chunk) < 10:
             continue
-
         try:
             response = await llm.ainvoke([
-                HumanMessage(content=onto_prompt),
-                HumanMessage(content=f"请解析以下文本（第{i+1}/{len(chunks)}块）：\n\n{chunk}"),
+                HumanMessage(content=classify_prompt),
+                HumanMessage(content=f"请解析以下文本，识别实体和关系（第{i+1}/{len(chunks)}块）：\n\n{chunk}"),
             ])
             text = response.content if hasattr(response, "content") else str(response)
             result = _parse_entities_json(text)
-
-            # 检查是否解析失败（_parse_error 标记）
             if result.pop("_parse_error", None):
-                chunk_errors.append({
-                    "chunk_index": i + 1,
-                    "reason": "JSON提取失败 — LLM 返回无法解析为 JSON",
-                    "raw_snippet": result.pop("_raw_snippet", "")[:300],
-                })
+                chunk_errors.append({"chunk_index": i+1, "reason": "分类阶段 JSON 解析失败", "raw_snippet": result.pop("_raw_snippet", "")[:200]})
                 continue
-
-            # Merge entities
             for ent in result.get("entities", []):
                 name = (ent.get("name") or "").strip()
                 if not name:
                     continue
-                if name not in all_entities:
-                    all_entities[name] = {
-                        "name": name,
-                        "ont_type": ent.get("ont_type", "M_ENTITY"),
-                        "type_name": ent.get("type_name", ""),
-                        "properties": ent.get("properties", {}),
-                    }
-                else:
-                    # Merge properties from duplicate
-                    existing = all_entities[name]
-                    for k, v in (ent.get("properties") or {}).items():
-                        if k not in existing["properties"] or not existing["properties"][k]:
-                            existing["properties"][k] = v
-
-            # Merge relationships
+                if name not in all_classified:
+                    all_classified[name] = {"name": name, "ont_type": ent.get("ont_type", "M_ENTITY")}
             for rel in result.get("relationships", []):
                 s = (rel.get("start_node_id") or rel.get("subject") or "").strip()
                 p = (rel.get("type") or rel.get("predicate") or "").strip()
@@ -1398,16 +1500,59 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
                 key = f"{s}|{p}|{o}"
                 if key not in seen_rels:
                     seen_rels.add(key)
-                    all_relationships.append({
-                        "start_node_id": s, "type": p, "end_node_id": o,
-                        "properties": rel.get("properties", {}),
-                    })
-
+                    all_relationships.append({"start_node_id": s, "type": p, "end_node_id": o, "properties": rel.get("properties", {})})
         except Exception as e:
-            chunk_errors.append({
-                "chunk_index": i + 1,
-                "reason": f"LLM 调用失败: {str(e)}",
-            })
+            chunk_errors.append({"chunk_index": i+1, "reason": f"分类阶段 LLM 调用失败: {str(e)}"})
+
+    if not all_classified:
+        return {"filename": safe_name, "entity_count": 0, "relationship_count": len(all_relationships), "type_counts": {}, "entities": [], "relationships": all_relationships, "phase1_classified": 0, "chunk_errors": chunk_errors[:10]}
+
+    # =====================================================================
+    # 阶段 2: 字段提取 — 按类型分组，调用 _get_inherited_fields 取字段
+    #           然后让 LLM 按这些字段从原文中提取值
+    # =====================================================================
+    by_type: dict[str, list[str]] = {}
+    for name, info in all_classified.items():
+        t = info["ont_type"]
+        by_type.setdefault(t, []).append(name)
+
+    all_entities: dict[str, dict] = {}
+    extract_errors: list[dict] = []
+
+    for ont_type, names in by_type.items():
+        # 通过通用接口获取该类型的完整继承字段
+        inherited = _get_inherited_fields(ont_type)
+        if not inherited:
+            for name in names:
+                all_entities[name] = {"name": name, "ont_type": ont_type, "type_name": "", "properties": {}}
+            continue
+
+        extract_prompt = _build_extract_prompt(ont_type)
+        entity_list_text = "\n".join(f"- {n}" for n in names)
+
+        try:
+            response = await llm.ainvoke([
+                HumanMessage(content=extract_prompt),
+                HumanMessage(content=f"以下实体需要提取字段值（类型={ont_type}）：\n{entity_list_text}\n\n原始文本已在上文中提供，请为每个实体提取字段值，返回 JSON："),
+            ])
+            text = response.content if hasattr(response, "content") else str(response)
+            result = _parse_entities_json(text)
+            if result.pop("_parse_error", None):
+                extract_errors.append({"ont_type": ont_type, "reason": "字段提取 JSON 解析失败"})
+                for name in names:
+                    all_entities[name] = {"name": name, "ont_type": ont_type, "type_name": "", "properties": {}}
+                continue
+            for ent in result.get("entities", []):
+                nm = (ent.get("name") or "").strip()
+                if nm in names or nm in all_classified:
+                    all_entities[nm] = {"name": nm, "ont_type": ont_type, "type_name": ent.get("type_name", ""), "properties": ent.get("properties", {})}
+            for name in names:
+                if name not in all_entities:
+                    all_entities[name] = {"name": name, "ont_type": ont_type, "type_name": "", "properties": {}}
+        except Exception as e:
+            extract_errors.append({"ont_type": ont_type, "reason": f"字段提取 LLM 调用失败: {str(e)}"})
+            for name in names:
+                all_entities[name] = {"name": name, "ont_type": ont_type, "type_name": "", "properties": {}}
 
     entities_list = list(all_entities.values())
 
@@ -1424,10 +1569,11 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
         "type_counts": type_counts,
         "entities": entities_list,
         "relationships": all_relationships,
-        "chunks_total": total_chunks,
-        "chunks_ok": total_chunks - len(chunk_errors),
+        "chunks_total": len(valid_chunks),
+        "chunks_ok": len(valid_chunks) - len(chunk_errors),
         "chunks_failed": len(chunk_errors),
-        "chunk_errors": chunk_errors[:10],  # 最多返回前 10 条错误
+        "chunk_errors": chunk_errors[:10],
+        "extract_errors": extract_errors[:10],
     }
 
 
@@ -1996,11 +2142,13 @@ class SceneDictCreate(BaseModel):
     id: str = Field(default="", max_length=32, description="词典ID，留空自动生成UUID")
     scene_id: str = Field(..., max_length=32, description="所属场景ID")
     dictionary_name: str = Field(..., max_length=200, description="词典名称")
+    dictionary_code: Optional[str] = Field(None, max_length=100, description="词典编码")
     dictionary_type_id: Optional[str] = Field(None, max_length=32, description="词条分类ID")
     dictionary_content: Optional[str] = Field(None, description="词典内容")
 
 class SceneDictUpdate(BaseModel):
     dictionary_name: Optional[str] = Field(None, max_length=200)
+    dictionary_code: Optional[str] = Field(None, max_length=100)
     dictionary_type_id: Optional[str] = Field(None, max_length=32)
     dictionary_content: Optional[str] = None
     delete_flag: Optional[str] = Field(None, max_length=2)
@@ -2061,8 +2209,8 @@ async def create_dict_direct(body: SceneDictCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
         await _execute_scene(
-            "INSERT INTO ontol_scene_dictionary (id, scene_id, dictionary_name, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?)",
-            (dict_id, body.scene_id, body.dictionary_name, body.dictionary_type_id or None, body.dictionary_content or ""),
+            "INSERT INTO ontol_scene_dictionary (id, scene_id, dictionary_name, dictionary_code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
+            (dict_id, body.scene_id, body.dictionary_name, body.dictionary_code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         return rows[0]
@@ -2097,8 +2245,8 @@ async def create_dict(scene_id: str, body: SceneDictCreate):
         if existing:
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
         await _execute_scene(
-            "INSERT INTO ontol_scene_dictionary (id, scene_id, dictionary_name, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?)",
-            (dict_id, scene_id, body.dictionary_name, body.dictionary_type_id or None, body.dictionary_content or ""),
+            "INSERT INTO ontol_scene_dictionary (id, scene_id, dictionary_name, dictionary_code, dictionary_type_id, dictionary_content) VALUES (?,?,?,?,?,?)",
+            (dict_id, scene_id, body.dictionary_name, body.dictionary_code or "", body.dictionary_type_id or None, body.dictionary_content or ""),
         )
         rows = await _query_scene("SELECT * FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         return rows[0]
