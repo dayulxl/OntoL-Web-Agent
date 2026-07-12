@@ -154,20 +154,22 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 点击卡片弹出居中编辑弹窗
 
 ### 推理机代理
-- `POST /api/v1/tools/call` → KG 推理机 (`KG_SERVER_URL`)
-- 默认工具名 `infer_forward`，也可调用 `validate`, `check_rule`, `expand`, `infer_on_nodes_id`
+- `POST /api/v1/tools/call` → KG 推理机 (`KG_SERVER_URL`)，支持 `infer_forward`、`validate`、`check_rule`、`expand`
+- `POST /api/v1/infer-on-nodes` → KG 推理机 `/infer-on-nodes-id-fc`，NDJSON 响应自动解析为结构化 messages
 - **副本节点 ID 规则**：推理机创建副本节点时，节点 ID 必须为 `{原节点ID}-{副本编码}`（如 `node_12345-V1.0`），确保图内全局唯一
 - **图节点/边 Snowflake ID**：Memgraph 中所有节点和边的 `id` 使用 **Snowflake 算法** 生成 **64 位纯数字整数**（int64，不转字符串）；导入时 `SnowflakeGenerator` 先查询已有 ID 去重，再将 LLM 随机字符串 ID 替换为纯数字 Snowflake ID，相同随机串映射到相同 Snowflake ID
 
 ### 推演副本管理 🆕
-- **表**: `ontol_cope_version` — 副本主键 id + 副本名称 name + 状态 cope_version_status(00待处理/01推理中/02推理完成/03已删除) + 初始节点 init_note_id/init_note_name + 置信度 confidence + 描述 description
+- **表**: `ontol_cope_version` — 副本主键 id + 副本名称 name + 状态 cope_version_status(00待处理/01推理中/02推理完成/03已删除) + 初始节点 init_note_id/init_note_name + 置信度 confidence(0.01~1.00，默认0.8) + 描述 description
 - **关联表**: `ontol_chat_cope_version_relation` — id + chat_id + cope_version_id（对话↔副本多对一绑定）
-- **API**: `GET/POST/PUT/DELETE /api/v1/cope-versions` + `GET /api/v1/cope-versions/{id}/graph`（副本图数据）+ `DELETE /api/v1/cope-versions/{id}/nodes`（删除副本节点）
+- **API**: `GET/POST/PUT/DELETE /api/v1/cope-versions` + `GET /api/v1/cope-versions/{id}`（单条） + `GET /api/v1/cope-versions/{id}/graph`（副本图数据） + `DELETE /api/v1/cope-versions/{id}/nodes`（删除副本节点）
+- **对话-副本绑定 API**: `POST /api/v1/chat-cope-versions/bind`（先删旧再绑新） + `GET /api/v1/chat-cope-versions/{chat_id}` + `DELETE /api/v1/chat-cope-versions/{id}`
 - **图数据查询逻辑**: status=00 → 查无 cope_version 属性的原始节点；status≠00 → 查 cope_version={id} 的副本节点
-- **沙盘推演副本模式**: `?id={cope_id}` 进入推演模式，工具栏显示推演名称+初始节点；点击「推演」→ 调用 `infer_on_nodes_id` 工具；推理成功 → 状态自动变 02
-- **重置按钮**: 推演模式下显「🔄 重置」，根据 graph_id 用原节点数据覆盖副本节点
+- **沙盘推演副本模式**: `?id={cope_id}` 进入推演模式，工具栏显示推演名称+初始节点，置信度输入框同步副本 confidence 值
+- **推理结果展示**: NDJSON → 拆分为 messages 数组 → 按 `═══ Step` 分组 → 再按 `【第N步】` 拆卡片，工具栏下方横向排列
+- **重置按钮**: 推演模式下显「🔄 重置」，根据 graph_id 查原节点属性覆盖副本节点
 - **节点隔离**: 推演模式下创建的节点/关系自动注入 `cope_version={id}` 属性
-- **AI 对话绑定**: 新建对话时可选推演副本，未选则自动创建新副本关联 chat_id
+- **AI 对话绑定**: 新建对话时可选推演副本，未选则自动创建 + 写入关联表
 
 ### 本体前缀规范
 

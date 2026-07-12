@@ -457,6 +457,45 @@ async def tools_call(body: ToolsCallBody):
         raise HTTPException(status_code=503, detail=f"KG reasoning server unreachable: {e}")
 
 
+class InferOnNodesBody(BaseModel):
+    node_ids: list[str] = Field(default_factory=list, description="节点内置ID列表")
+    confidence: float = Field(default=0.8, description="置信度")
+    cope_version: str = Field(default="", description="副本版本号")
+
+
+@router.post("/infer-on-nodes")
+async def infer_on_nodes(body: InferOnNodesBody):
+    """代理转发到 KG 推理机的 /infer-on-nodes-id-fc。"""
+    import requests as req
+    from common.config.settings import get_settings
+
+    kg_url = get_settings().kg_server_url
+    try:
+        resp = req.post(
+            f"{kg_url}/infer-on-nodes-id-fc",
+            json={"node_ids": body.node_ids, "confidence": body.confidence, "cope_version": body.cope_version},
+            timeout=300,
+        )
+        try:
+            data = resp.json()
+        except Exception:
+            # NDJSON 格式 → 拆行解析，提取 msg
+            lines = [line.strip() for line in resp.text.strip().split('\n') if line.strip()]
+            msgs = []
+            for line in lines:
+                try:
+                    obj = json.loads(line)
+                    if obj.get("msg"):
+                        msgs.append(obj["msg"])
+                except Exception:
+                    msgs.append(line)
+            data = {"ok": True, "messages": msgs, "raw_text": resp.text}
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=data, status_code=resp.status_code)
+    except req.RequestException as e:
+        raise HTTPException(status_code=503, detail=f"KG reasoning server unreachable: {e}")
+
+
 @router.get("/ontology/search")
 async def search_nodes(keyword: str, limit: int = 20, graph=Depends(get_graph)):
     """按关键词搜索节点。"""
