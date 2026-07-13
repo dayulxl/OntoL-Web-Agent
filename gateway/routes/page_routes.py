@@ -245,10 +245,18 @@ async def sandbox_wargame_page(request: Request):
 @router.get("/upload", response_class=HTMLResponse)
 async def upload_page(request: Request):
     ctx = request_context.get()
+    model_groups: list[dict] = await _build_model_groups_from_db()
+    default_model = ""
+    for g in model_groups:
+        if g["models"]:
+            default_model = g["models"][0]["id"]
+            break
     return _render("pages/upload.html", {
         "request": request,
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),
+        "model_groups": model_groups,
+        "default_model": default_model,
     })
 
 
