@@ -1499,6 +1499,60 @@ def _build_extract_prompt(ont_type: str) -> str:
     return "\n".join(lines)
 
 
+# =====================================================================
+# Word 文档文本提取（用于 /upload/parse）
+# =====================================================================
+
+
+def _extract_text_from_docx(path: str) -> str:
+    """从 .docx 文件提取纯文本。"""
+    from docx import Document
+
+    doc = Document(path)
+    paragraphs: list[str] = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            paragraphs.append(text)
+
+    # 也提取表格中的文本
+    for table in doc.tables:
+        for row in table.rows:
+            row_texts = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if row_texts:
+                paragraphs.append(" | ".join(row_texts))
+
+    content = "\n\n".join(paragraphs)
+    if not content.strip():
+        raise ValueError("未从 .docx 文件中提取到文本内容")
+    return content
+
+
+def _extract_text_from_doc(path: str) -> str:
+    """从 .doc 文件提取纯文本（依赖 antiword 命令行工具）。"""
+    import subprocess
+    import shutil
+
+    antiword = shutil.which("antiword")
+    if not antiword:
+        raise RuntimeError("服务器未安装 antiword，无法解析 .doc 文件。请将文件另存为 .docx 或 .txt 格式后重新上传。")
+
+    result = subprocess.run(
+        [antiword, path],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        raise RuntimeError(f"antiword 解析 .doc 文件失败: {stderr or '未知错误'}")
+
+    content = result.stdout.strip()
+    if not content:
+        raise ValueError("未从 .doc 文件中提取到文本内容")
+    return content
+
+
 @router.post("/upload/parse")
 async def parse_file_to_entities(body: ParseTriplesRequest):
     """
@@ -1514,16 +1568,22 @@ async def parse_file_to_entities(body: ParseTriplesRequest):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"File '{safe_name}' not found")
 
+    # ── 文本提取：支持 .txt / .docx / .doc ──
+    suffix = file_path.suffix.lower()
     try:
-        content = file_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="无法读取二进制文件，请上传文本格式文件")
+        if suffix == ".docx":
+            content = _extract_text_from_docx(str(file_path))
+        elif suffix == ".doc":
+            content = _extract_text_from_doc(str(file_path))
+        else:
+            content = file_path.read_text(encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"文件解析失败: {str(e)}")
 
-    from capabilities.models.factory import ModelFactory
+    from capabilities.models.resolver import resolve_llm
     from langchain_core.messages import HumanMessage
 
-    factory = ModelFactory()
-    llm_iface = factory.create_llm(body.model)
+    llm_iface = resolve_llm(body.model)
     llm = await llm_iface.get_llm()
 
     # ── 分块 ──

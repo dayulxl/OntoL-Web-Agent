@@ -70,6 +70,50 @@ class ModelFactory:
             provider_key, model_name = model_name.split("::", 1)
         return self._create_model("llm", model_name or self._default_for("llm", "claude-sonnet-4-6"), provider_key)
 
+    def create_llm_from_config(
+        self,
+        base_url: str = "",
+        api_key: str = "",
+        model_name: str = "",
+    ) -> ModelInterface:
+        """
+        使用外部配置（如 ontol_llm_config 表）创建 LLM 实例。
+        不依赖 models.yaml，直接传入连接参数。
+
+        Args:
+            base_url:  API 端点 (OpenAI 兼容)。
+            api_key:   API Key。
+            model_name: 模型名（如 deepseek-v4-pro）。
+        """
+        from langchain_openai import ChatOpenAI
+
+        _name = model_name
+        _base_url = base_url
+        _key = api_key
+
+        class _M(ModelInterface):
+
+            async def get_llm(self):
+                if not hasattr(self, "_llm"):
+                    self._llm = ChatOpenAI(
+                        model=_name,
+                        base_url=_base_url,
+                        api_key=_key or "not-needed",
+                        temperature=0,
+                        max_tokens=8192,
+                    )
+                return self._llm
+
+            def model_name(self): return _name
+
+            async def token_count(self, text: str):
+                return (await self.get_llm()).get_num_tokens(text)
+
+            async def get_pricing(self):
+                return {"input": 0.0, "output": 0.0}
+
+        return _M()
+
     def create_embedding(self, model_name: Optional[str] = None):
         """创建 Embedding 模型 (返回 LangChain Embeddings 实例)。"""
         return self._create_embedding_model(model_name or self._default_for("embedding", "text-embedding-3-large"))

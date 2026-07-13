@@ -25,32 +25,7 @@ class ChatRequest(BaseModel):
 router = APIRouter(tags=["Chat"])
 
 
-def _resolve_model(model_param: str):
-    """从 ontol_llm_config 表解析模型配置，创建 LLM 实例。"""
-    from capabilities.models.factory import ModelFactory
-    factory = ModelFactory()
-
-    db_path = Path("infrastructure/db/ontol.db")
-    if not model_param:
-        raise HTTPException(status_code=400, detail="未指定模型，请在下拉框中选择一个模型")
-    if not db_path.exists():
-        raise HTTPException(status_code=500, detail="数据库未就绪")
-
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT * FROM ontol_llm_config WHERE id=? AND delete_flag='0'", (model_param,)
-    ).fetchone()
-    conn.close()
-
-    if not row:
-        raise HTTPException(status_code=404, detail=f"模型配置 {model_param} 不存在")
-
-    return factory.create_llm_from_config(
-        base_url=row["llm_url"] or "",
-        api_key=row["llm_key"] or "",
-        model_name=row["llm_model"] or row["name"],
-    )
+from capabilities.models.resolver import resolve_llm
 
 
 def _load_scene_prompts(scene_ids: list[str]) -> list[dict]:
@@ -102,7 +77,14 @@ async def chat(request: ChatRequest):
     """
 
     # 解析并预检模型
-    llm_iface = _resolve_model(request.model)
+    if not request.model:
+        raise HTTPException(status_code=400, detail="未指定模型，请在下拉框中选择一个模型")
+    try:
+        llm_iface = resolve_llm(request.model)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     try:
         await llm_iface.get_llm()
     except Exception as e:

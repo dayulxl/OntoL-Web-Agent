@@ -81,7 +81,7 @@ class OntologyRepo:
 
     async def get_children(self, parent_id: str) -> list[dict]:
         """获取直接子节点。"""
-        return await self.model.list(where={"ontol_parent_id": parent_id}, order_by="ontol_model_type, name")
+        return await self.model.list_rows(where={"ontol_parent_id": parent_id}, order_by="ontol_model_type, name")
 
     # ==================================================================
     # 模型 + 属性 复合查询
@@ -92,7 +92,7 @@ class OntologyRepo:
         model = await self.model.get_by_id(model_id)
         if not model:
             return None
-        attrs = await self.attr.list(where={"ontol_model_id": model_id}, order_by="attr_is_system DESC, attr_order, code")
+        attrs = await self.attr.list_rows(where={"ontol_model_id": model_id}, order_by="attr_is_system DESC, attr_order, code")
         model["attributes"] = attrs
         return model
 
@@ -129,7 +129,7 @@ class OntologyRepo:
         where = {"ontol_model_id": model_id}
         if is_system:
             where["attr_is_system"] = is_system
-        return await self.attr.list(where=where, order_by="attr_is_system DESC, attr_order, code")
+        return await self.attr.list_rows(where=where, order_by="attr_is_system DESC, attr_order, code")
 
     # ==================================================================
     # 搜索

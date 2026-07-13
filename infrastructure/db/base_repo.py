@@ -8,7 +8,7 @@ PostgreSQL 通用 Repository 基类
     from infrastructure.db.base_repo import BaseRepository
 
     repo = BaseRepository(pool, "ontol_model")
-    rows = await repo.list(where={"ontol_model_type": "M_ENTITY"}, limit=50)
+    rows = await repo.list_rows(where={"ontol_model_type": "M_ENTITY"}, limit=50)
 
     # 继承使用
     class MyRepo(BaseRepository):
@@ -161,7 +161,7 @@ class BaseRepository:
 
         return dict(row) if row else None
 
-    async def list(
+    async def list_rows(
         self,
         *,
         where: Optional[WhereClause] = None,

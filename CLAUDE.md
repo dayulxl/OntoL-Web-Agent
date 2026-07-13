@@ -5,11 +5,11 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 ## 启动服务
 
 ```bash
-/c/Users/admin/AppData/Local/pypoetry/Cache/virtualenvs/langgraph-cluster-AHI-zXgB-py3.14/Scripts/python.exe -m gateway.app
+/c/Users/84578/AppData/Local/pypoetry/Cache/virtualenvs/langgraph-cluster-9zMcaQV9-py3.11/Scripts/python.exe -m gateway.app
 ```
 
-- **Python 环境**：Poetry 虚拟环境 `langgraph-cluster-AHI-zXgB-py3.14`，Python 3.14
-- **工作目录**：`d:\langchain`
+- **Python 环境**：Poetry 虚拟环境 `langgraph-cluster-9zMcaQV9-py3.11`，Python 3.11
+- **工作目录**：`d:\OntoL-Web-Agent`
 - **配置文件**：`.env`（通过 `pydantic-settings` 自动加载）
 - **不允许**使用 `poetry run`（bash 环境中 `poetry` 不在 PATH），必须使用虚拟环境中的 Python 解释器
 
@@ -39,6 +39,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 情报展示 | http://localhost:8000/intelligence | Entity 节点详情 |
 | 数据管理 | http://localhost:8000/datamanage | 数据源/API/内置接口/日志管理（卡片式） |
 | 推理机控制台 | http://localhost:8000/reasoning | 选起点节点、配推理规则、看实时执行日志 |
+| LLM 配置 | http://localhost:8000/llm-config | LLM 模型配置 CRUD（类型+配置），为 /chat 和 /upload 提供统一模型接口 |
 
 ## 项目结构
 
@@ -79,6 +80,10 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   │   └── versioning/             #   版本管理
 │   ├── tools/                      # 工具集 (knowledge_graph / registry)
 │   ├── models/                     # 模型配置
+│   │   ├── factory.py               #   ModelFactory — 多类型/多提供商创建
+│   │   ├── resolver.py              #   LLM 共享解析器 (DB 配置 → factory)
+│   │   ├── interfaces.py            #   ModelInterface 抽象协议
+│   │   └── models.yaml              #   模型注册表 (7 种类型)
 │   ├── prompts/                    # 提示词 (agents / chains)
 │   └── chains/                     # 链式调用
 ├── common/                 # 共享设施
@@ -90,7 +95,9 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   └── db/
 │       ├── neo4j.py                # Memgraph 驱动 (memgraph://→bolt://)
 │       ├── sqlite_db.py            # SQLite 自动建表+种子
-│       └── ontol.db                # 本体模型数据库 (12 张表)
+│       ├── base_repo.py            # PostgreSQL/asyncpg 通用 Repository (CRUD 基类)
+│       ├── ontology_repo.py        # 本体模型树形查询 + 属性查询
+│       └── ontol.db                # 本体模型数据库 (14 张表)
 ├── webAPP/                 # 前端资源 (运行时加载)
 │   ├── templates/                  # Jinja2 模板 (活跃)
 │   │   ├── pages/                  #   页面模板 (12 个)
@@ -127,6 +134,8 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
   - `ontol_datasource_type` — 数据源类型（`is_system='1'`=系统预设，不可删改）
   - `ontol_cope_version` — 🆕 推演副本表（状态 00/01/02/03 + 初始节点 + 置信度）
   - `ontol_chat_cope_version_relation` — 🆕 对话-副本关联表（chat_id + cope_version_id）
+  - `ontol_llm_type_config` — 🆕 LLM 类型配置（provider 协议：OpenAI/Anthropic/OpenAI-compatible 等）
+  - `ontol_llm_config` — 🆕 LLM 模型实例配置（url/key/model，外键关联 ontol_llm_type_config）
 - **数据主键约定**: 所有表的 `id` 由后端 `uuid.uuid4().hex[:16]` 自动生成，前端表单禁止展示 id 输入框，列表不展示原始 id；`code`/`name` 等仅作业务语义字段
 - **表命名规范**: SQLite 中所有本体语义相关的配置/元数据表必须以 `ontol_` 为前缀
 - **前端按钮布局规范**: 新增按钮放在内容区顶部，必须有可见按钮不含快捷键；编辑/删除按钮：列表行右侧/卡片右上角
@@ -177,6 +186,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 关系类型为自由输入框（非下拉）
 
 ### 文件上传 & 导入 (/upload)
+- 支持 **多格式文件解析**：`.txt` / `.docx`（python-docx 提取段落+表格）/ `.doc`（antiword CLI 提取）
 - LLM 解析文本 → 本体类型识别 + 字段填充
 - **导入前校验** (`/api/v1/upload/validate-entities`)：检测 ont_type 模板匹配
   - 无匹配模板 → ⚠️ 红色警告，提示先创建本体模型
@@ -184,6 +194,33 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 补全规则：M_ROOT 字段全局共用，各类型沿 ontol_parent_id 链向上继承
 - 解析完成后弹出场景多选弹窗（默认勾选系统预设场景）
 - 导入实体后写入 `ontol_node_scene_relation` 节点-场景绑定
+
+### LLM 配置 (/llm-config) 🆕
+
+统一提供 LLM 模型接口，供 `/chat` 和 `/upload` 两个页面共用。
+
+**架构**：
+```
+/llm-config (UI) → ontol_llm_config 表 ← resolve_llm(config_id)
+                     │                        ↑
+                     │ capabilities/models/resolver.py
+                     │   ├─ 查 DB ontol_llm_config → create_llm_from_config()
+                     │   └─ DB 未命中 → models.yaml 兜底
+                     │
+              /chat ─┼─ /upload   (两个页面只调用 resolve_llm，不重复实现)
+```
+
+**核心模块**：
+- `capabilities/models/resolver.py` — 共享解析器，唯一入口 `resolve_llm(config_id)`
+- `capabilities/models/factory.py::create_llm_from_config()` — 从外部配置创建 LLM 实例（独立于 models.yaml）
+- `gateway/routes/chat_routes.py` — `from capabilities.models.resolver import resolve_llm`
+- `gateway/routes/ontology_routes.py` — /upload/parse 共用同一个 `resolve_llm`
+
+**API**：
+- `GET/POST/PUT/DELETE /api/v1/llm-type-configs` — LLM 类型配置（provider 协议）
+- `GET/POST/PUT/DELETE /api/v1/llm-configs` — LLM 模型实例配置（url/key/model）
+
+**⚠️ 命名注意事项**：`BaseRepository` 中的方法名 `list` 会覆盖 Python 内置 `list` 类型，导致 `list[str]` 类型标注报错 `TypeError: 'function' object is not subscriptable`。该类中已使用 `list_rows` 替代 `list`。新增方法时避免与内置函数重名。
 
 ### 数据管理 (/datamanage)
 - 左侧标签切换：数据源 / 动态API / 内置接口 / 接口日志
@@ -346,5 +383,5 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 ## 测试
 
 ```bash
-/c/Users/admin/AppData/Local/pypoetry/Cache/virtualenvs/langgraph-cluster-AHI-zXgB-py3.14/Scripts/python.exe -m pytest tests/ -v
+/c/Users/84578/AppData/Local/pypoetry/Cache/virtualenvs/langgraph-cluster-9zMcaQV9-py3.11/Scripts/python.exe -m pytest tests/ -v
 ```
