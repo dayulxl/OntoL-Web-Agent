@@ -121,13 +121,18 @@ async def clone_node(original_id: int, cope_version: str, cm: dict[int, tuple[di
 
 
 async def clone_edge(src_copy_id: int, tgt_copy_id: int, rel_type: str, rel_props: dict) -> None:
-    """副本节点间建边。"""
+    """副本节点间建边。自动注入创建/更新时间。"""
+    from datetime import datetime
+    props = dict(rel_props or {})
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    props["create_time"] = now
+    props["update_time"] = now
     driver = await get_driver()
     async with driver.session() as session:
         await session.run(
             "MATCH (a), (b) WHERE id(a) = $src AND id(b) = $tgt "
             f"CREATE (a)-[r:`{rel_type}`]->(b) SET r = $props",
-            src=src_copy_id, tgt=tgt_copy_id, props=rel_props)
+            src=src_copy_id, tgt=tgt_copy_id, props=props)
 
 
 async def update_node_props(node_id: int, props: dict) -> None:

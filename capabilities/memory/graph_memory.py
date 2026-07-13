@@ -6,6 +6,7 @@
 封装图数据库操作，供 Agent 和 Chain 使用。
 """
 from typing import Optional
+from datetime import datetime
 
 from neo4j._async.driver import AsyncDriver
 
@@ -167,6 +168,10 @@ class GraphMemory:
             {"id", "labels", "properties"}。
         """
         safe_label = label.replace("`", "")
+        # 注入创建/更新时间
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        properties["create_time"] = now
+        properties["update_time"] = now
         async with self._driver.session() as session:
             result = await session.run(
                 f"CREATE (n:`{safe_label}`) SET n = $props RETURN n",
@@ -180,7 +185,7 @@ class GraphMemory:
 
     async def update_node(self, node_id: int, properties: dict, remove_keys: Optional[list[str]] = None) -> Optional[dict]:
         """
-        更新节点属性。SET 合并新属性，REMOVE 清除指定 key。
+        更新节点属性。SET 合并新属性，REMOVE 清除指定 key。自动刷新 update_time。
 
         Args:
             node_id: 节点 ID。
@@ -190,6 +195,9 @@ class GraphMemory:
         Returns:
             {"id", "labels", "properties"} 或 None。
         """
+        # 注入更新时间，移除不可修改的系统字段
+        properties["update_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        properties.pop("create_time", None)  # 创建时间不可修改
         async with self._driver.session() as session:
             # 1. 合并新属性
             await session.run(
@@ -198,9 +206,13 @@ class GraphMemory:
                 props=properties,
             )
             # 2. 删除指定属性（Memgraph 不支持 n[$key] 动态属性访问，用 safe key + Cypher REMOVE）
+            # 系统字段保护，不可删除
+            _PROTECTED_KEYS = {"create_time", "update_time", "id", "type"}
             if remove_keys:
                 import re as _re
                 for k in remove_keys:
+                    if k in _PROTECTED_KEYS:
+                        continue
                     # 只允许字母/数字/下划线，防注入
                     if not _re.match(r'^[A-Za-z_]\w*$', k):
                         continue
@@ -256,6 +268,10 @@ class GraphMemory:
         """
         safe_type = rel_type.replace("`", "")
         props = properties or {}
+        # 注入创建/更新时间
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        props["create_time"] = now
+        props["update_time"] = now
         async with self._driver.session() as session:
             result = await session.run(
                 f"MATCH (a), (b) WHERE id(a) = $source_id AND id(b) = $target_id "
@@ -293,6 +309,32 @@ class GraphMemory:
             )
             record = await result.single()
             return record["deleted"] > 0
+
+    async def update_edge(self, edge_id: int, properties: dict) -> Optional[dict]:
+        """
+        更新关系的属性。会自动刷新 update_time。
+
+        Args:
+            edge_id: 关系 ID。
+            properties: 要合并的属性。
+
+        Returns:
+            {"id", "properties"}，不存在则返回 None。
+        """
+        props = dict(properties)
+        # 系统字段保护：创建时间不可修改，更新时间强制刷新
+        props.pop("create_time", None)
+        props["update_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        async with self._driver.session() as session:
+            result = await session.run(
+                "MATCH ()-[e]->() WHERE id(e) = $eid SET e += $props "
+                "RETURN id(e) AS id, properties(e) AS props",
+                eid=edge_id, props=props,
+            )
+            rec = await result.single()
+            if not rec:
+                return None
+            return {"id": rec["id"], "properties": dict(rec["props"] or {})}
 
     async def list_all_edges(self, limit: int = 2000) -> list[dict]:
         """

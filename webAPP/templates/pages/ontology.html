@@ -720,10 +720,14 @@ function renderSidebar() {
         const relType = e.data?.type || e.data?.label || e.label || '关联';
         const srcName = _addEdgeNodes.find(n => n.id === Number(e.source))?.properties?.name || '#' + e.source;
         const tgtName = _addEdgeNodes.find(n => n.id === Number(e.target))?.properties?.name || '#' + e.target;
+        const createTime = edgeProps.create_time || '';
+        const updateTime = edgeProps.update_time || '';
         s.innerHTML = `
             <h3>📎 关系详情</h3>
             <div style="background:rgba(0,212,255,0.04);padding:0.6rem;border-radius:6px;margin-bottom:0.6rem;font-size:0.78rem;">
                 <div><b style="color:var(--text-dim);">ID:</b> ${e.id}</div>
+                <div><b style="color:var(--text-dim);">创建时间:</b> ${escHtml(String(createTime)) || '—'}</div>
+                <div><b style="color:var(--text-dim);">修改时间:</b> ${escHtml(String(updateTime)) || '—'}</div>
                 <div><b style="color:var(--text-dim);">源:</b> #${e.source} (${escHtml(srcName)})</div>
                 <div><b style="color:var(--text-dim);">目标:</b> #${e.target} (${escHtml(tgtName)})</div>
             </div>
@@ -740,11 +744,11 @@ function renderSidebar() {
                 <button onclick="deleteEdgeConfirm(${e.id})" style="border-color:#ef4444;color:#ef4444;">🗑 删除</button>
                 <button onclick="closeSidebar()">关闭</button>
             </div>`;
-        // 只回填有值的属性（标准属性带占位提示）
+        // 回填可编辑边属性，跳过系统时间戳
         const stdMap = {};
         STandARD_EDGE_PROPS.forEach(p => { stdMap[p.key] = p.desc; });
         Object.keys(edgeProps).forEach(k => {
-            if (edgeProps[k]) addEdgePropRow(k, edgeProps[k], stdMap[k] || '');
+            if (edgeProps[k] && k !== 'create_time' && k !== 'update_time') addEdgePropRow(k, edgeProps[k], stdMap[k] || '');
         });
         return;
     }

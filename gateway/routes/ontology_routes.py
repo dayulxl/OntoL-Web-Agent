@@ -266,11 +266,6 @@ async def create_node(body: NodeCreate, graph=Depends(get_graph)):
         # 雪花 ID：如果前端没传 id 或 id 为空/占位符，自动生成
         if not props.get("id") or props.get("id") == "大模型随机生成":
             props["id"] = snowflake_id
-        # 自动设置时间
-        from datetime import datetime as _dt
-        now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-        props.setdefault("create_time", now)
-        props["update_time"] = now
 
         result = await graph.create_node(body.label, props)
         # 记录历史
@@ -288,10 +283,6 @@ async def update_node(node_id: int, body: NodeUpdate, graph=Depends(get_graph)):
         old_node = await graph.get_node(node_id)
         old_props = old_node["properties"] if old_node else {}
         new_props = body.properties
-
-        # 自动更新修改时间
-        from datetime import datetime as _dt
-        new_props["update_time"] = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 找出被删除的 key（旧有但新无）
         removed_keys = [k for k in old_props if k not in new_props]
@@ -407,17 +398,10 @@ class EdgeUpdate(BaseModel):
 async def update_edge(edge_id: int, body: EdgeUpdate, graph=Depends(get_graph)):
     """更新边的属性。"""
     try:
-        from infrastructure.db.neo4j import get_driver
-        driver = await get_driver()
-        async with driver.session() as session:
-            result = await session.run(
-                "MATCH ()-[e]->() WHERE id(e) = $eid SET e += $props RETURN id(e) AS id, properties(e) AS props",
-                eid=edge_id, props=body.properties or {},
-            )
-            rec = await result.single()
-            if not rec:
-                raise HTTPException(status_code=404, detail=f"Edge {edge_id} not found")
-            return {"id": rec["id"], "properties": dict(rec["props"] or {})}
+        result = await graph.update_edge(edge_id, body.properties or {})
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Edge {edge_id} not found")
+        return result
     except HTTPException:
         raise
     except Exception as e:
