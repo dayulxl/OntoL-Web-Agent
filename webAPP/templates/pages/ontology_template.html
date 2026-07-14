@@ -726,8 +726,8 @@ async function refreshAfterChange() {
         var data = await apiGet(API_MODEL + '/tree?with_attrs=true');
         treeData = data;
         updateFooter(data);
-        // 重新初始化树
-        initTreeView();
+        // 重新初始化树（传入最新数据，而非预加载的旧数据）
+        initTreeView(data);
         if (activeModel) {
             try {
                 var model = await apiGet(API_MODEL + '/' + encodeURIComponent(activeModel.id) + '?with_attrs=true');
@@ -760,8 +760,8 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'n' && e.ctrlKey) { e.preventDefault(); showCreateRootForm(); }
 });
 
-function initTreeView() {
-    treeView = new TreeView(ONTOLOGY_TREE_DATA, 'sidebarTree');
+function initTreeView(data) {
+    treeView = new TreeView(data || ONTOLOGY_TREE_DATA, 'sidebarTree');
     // 装饰节点(加徽标) + 绑定点击加载详情
     setTimeout(function() {
         decorateTreeNodes();
@@ -772,10 +772,11 @@ function initTreeView() {
 document.addEventListener('DOMContentLoaded', function() {
     initTreeView();
 
-    // 加载 PG 数据
+    // 加载 PG 数据，并用最新数据刷新树
     apiGet(API_MODEL + '/tree?with_attrs=true').then(function(data) {
         treeData = data;
         updateFooter(data);
+        initTreeView(data);
     }).catch(function(e) {
         console.warn('PG 离线:', e.message);
         document.getElementById('graphDot').classList.add('offline');
