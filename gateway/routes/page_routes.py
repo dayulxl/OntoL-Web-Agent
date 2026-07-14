@@ -125,12 +125,12 @@ def _build_ontology_tree_for_view() -> list:
     conn.row_factory = sqlite3.Row
     try:
         models = conn.execute(
-            "SELECT id, name, ontol_parent_id AS parent_id, ontol_model_type AS type_code, "
+            "SELECT id, name, ontol_parent_id AS parent_id, ontol_data_type AS type_code, "
             "ontol_model_desc AS desc FROM ontol_model WHERE delete_flag='0' ORDER BY id"
         ).fetchall()
         attrs = conn.execute(
             "SELECT ontol_model_id, code FROM ontol_model_attr "
-            "WHERE delete_flag='0'"
+            "WHERE delete_flag='0' AND attr_mapping='00'"
         ).fetchall()
     finally:
         conn.close()
