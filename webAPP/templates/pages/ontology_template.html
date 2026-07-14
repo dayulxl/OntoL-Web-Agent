@@ -770,18 +770,11 @@ function initTreeView(data) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    // [FIX] 直接用服务端预加载的 ONTOLOGY_TREE_DATA 渲染树，不依赖不存在的 /tree API
+    // 影响范围：页面首次加载时的左侧树渲染
     initTreeView();
-
-    // 加载 PG 数据，并用最新数据刷新树
-    apiGet(API_MODEL + '/tree?with_attrs=true').then(function(data) {
-        treeData = data;
-        updateFooter(data);
-        initTreeView(data);
-    }).catch(function(e) {
-        console.warn('PG 离线:', e.message);
-        document.getElementById('graphDot').classList.add('offline');
-        document.getElementById('graphStatus').textContent = 'PG 离线 · 使用预置数据';
-    });
+    treeData = ONTOLOGY_TREE_DATA;
+    updateFooter(ONTOLOGY_TREE_DATA);
 });
 </script>
 {% endblock %}
