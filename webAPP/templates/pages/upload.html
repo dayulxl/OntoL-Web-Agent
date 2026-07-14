@@ -91,6 +91,34 @@
 .modal-body .triple-table td.obj { color: #22c55e; }
 .modal-footer { padding: 0.8rem 1.2rem; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; gap: 0.5rem; justify-content: flex-end; }
 .modal-body .parse-loading { display: flex; align-items: center; gap: 0.6rem; color: var(--accent); padding: 2rem 0; justify-content: center; }
+
+/* ── 全自动导入日志控制台 ── */
+.auto-log-console {
+    background: #080c18; border: 1px solid rgba(0,212,255,0.12); border-radius: 8px;
+    padding: 0; font-family: 'SF Mono','Fira Code','Consolas',monospace; font-size: 0.71rem;
+    line-height: 1.6; max-height: 50vh; overflow-y: auto; user-select: text;
+}
+.auto-log-console::-webkit-scrollbar { width: 5px; }
+.auto-log-console::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.12); border-radius: 3px; }
+.log-line { padding: 0.22rem 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.015); display: flex; gap: 0.45rem; }
+.log-time { color: #444; flex-shrink: 0; font-size: 0.65rem; min-width: 60px; padding-top: 1px; }
+.log-icon { flex-shrink: 0; width: 15px; text-align: center; font-size: 0.75rem; }
+.log-icon.step  { color: var(--accent); }
+.log-icon.ok    { color: #22c55e; }
+.log-icon.info  { color: #3b82f6; }
+.log-icon.warn  { color: #f59e0b; }
+.log-icon.err   { color: #ef4444; }
+.log-msg { color: #9aa0b8; word-break: break-all; flex: 1; }
+.log-msg b { color: #e8ecf4; }
+.log-msg em { color: var(--accent); font-style: normal; }
+.log-divider { border: none; border-top: 1px dashed rgba(0,212,255,0.08); margin: 0.2rem 0; }
+.log-table { width: 100%; border-collapse: collapse; font-size: 0.66rem; margin: 0.2rem 0 0.2rem 1.8rem; }
+.log-table th { text-align: left; padding: 0.15rem 0.4rem; background: rgba(0,212,255,0.05); color: var(--accent); font-weight: 600; }
+.log-table td { padding: 0.1rem 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.02); color: #9aa0b8; }
+.log-table td.sbj { color: #f59e0b; } .log-table td.pred { color: var(--accent); } .log-table td.obj { color: #22c55e; }
+.log-summary { margin: 0.5rem 0.7rem 0.7rem; padding: 0.5rem 0.7rem; border: 1px solid rgba(34,197,94,0.18); border-radius: 6px; background: rgba(34,197,94,0.04); }
+.log-summary .sr { display: flex; justify-content: space-between; padding: 0.12rem 0; font-size: 0.7rem; }
+.log-summary .lbl { color: var(--text-dim); }  .log-summary .val { color: #fff; font-weight: 600; }
 </style>
 {% endblock %}
 
@@ -133,7 +161,9 @@
     <!-- 右：上传历史 -->
     <div class="upload-right">
         <div class="history-card" id="historyCard">
-            <h3><span class="dot"></span> 历史上传</h3>
+            <h3>
+                <span class="dot"></span> 历史上传
+            </h3>
             <div id="historyList"><div class="history-empty">加载中...</div></div>
         </div>
     </div>
@@ -159,6 +189,20 @@
         </div>
         <div class="modal-body" id="parseBody"></div>
         <div class="modal-footer" id="parseFooter"></div>
+    </div>
+</div>
+
+<!-- 全自动导入日志弹窗 -->
+<div class="modal-overlay" id="autoLogModal">
+    <div class="modal-box" style="max-width:900px;">
+        <div class="modal-header">
+            <h3 id="autoLogTitle">🤖 全自动导入日志</h3>
+            <button class="btn-close" onclick="closeAutoLog()">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="auto-log-console" id="autoLogConsole"></div>
+            <div id="autoLogSummary"></div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -262,15 +306,7 @@ function closeParseModal() {
     document.getElementById('parseBody').innerHTML = '';
     document.getElementById('parseFooter').innerHTML = '';
 }
-document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closePreviewModal(); closeParseModal(); }
-});
-document.getElementById('previewModal').addEventListener('click', function(e) {
-    if (e.target === this) closePreviewModal();
-});
-document.getElementById('parseModal').addEventListener('click', function(e) {
-    if (e.target === this) closeParseModal();
-});
+// [FIX] 所有弹窗只能通过 ✕ 按钮关闭，取消点击遮罩+Esc关闭 — 影响范围：upload页面全部弹窗
 
 async function previewFile(filename) {
     openPreviewModal('📄 ' + filename);
@@ -737,6 +773,347 @@ function importTriples() {
     importEntities();
 }
 
+// ────────────────────────────────────────────
+// 全自动导入 — 弹窗日志版
+// ────────────────────────────────────────────
+
+function _now() { var d = new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2); }
+
+// [FEAT] 读取错误响应体 — 先尝试JSON，再回退到纯文本，确保后端报错完整展示
+async function _readError(res) {
+    var text = await res.text().catch(function(){return'';});
+    try { var j = JSON.parse(text); return j.detail || j.message || text.substring(0,300); }
+    catch(_) { return text.substring(0,500) || ('HTTP '+res.status+' '+res.statusText); }
+}
+
+function openAutoLog(title) {
+    document.getElementById('autoLogTitle').textContent = '🤖 ' + title;
+    document.getElementById('autoLogConsole').innerHTML = '';
+    document.getElementById('autoLogSummary').innerHTML = '';
+    document.getElementById('autoLogModal').classList.add('open');
+}
+function closeAutoLog() {
+    document.getElementById('autoLogModal').classList.remove('open');
+}
+
+function _log(icon, cls, msg) {
+    var c = document.getElementById('autoLogConsole');
+    c.insertAdjacentHTML('beforeend',
+        '<div class="log-line"><span class="log-time">'+_now()+'</span><span class="log-icon '+cls+'">'+icon+'</span><span class="log-msg">'+msg+'</span></div>');
+    c.scrollTop = c.scrollHeight;
+}
+
+function _logTable(headers, rows) {
+    var c = document.getElementById('autoLogConsole');
+    var h = '<tr>'+headers.map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr>';
+    var b = rows.map(function(r){return '<tr>'+r.map(function(d){return '<td>'+d+'</td>';}).join('')+'</tr>';}).join('');
+    c.insertAdjacentHTML('beforeend','<table class="log-table">'+h+b+'</table>');
+}
+
+function _logDivider() {
+    document.getElementById('autoLogConsole').insertAdjacentHTML('beforeend','<hr class="log-divider">');
+}
+
+function _logSummary(items) {
+    var el = document.getElementById('autoLogSummary');
+    el.innerHTML = '<div class="log-summary">'+items.map(function(r){
+        return '<div class="sr"><span class="lbl">'+r[0]+'</span><span class="val'+ (r[2]?' '+r[2]:'') +'">'+r[1]+'</span></div>';
+    }).join('')+'</div>';
+}
+
+// [FEAT] 全自动上传入口 — 打开文件选择器 → 上传 → 走全自动导入弹窗日志
+function autoPickAndUpload() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.owl,.rdf,.json,.swrl,.csv,.txt,.xml,.ttl,.nt,.doc,.docx,.xls,.xlsx,.pdf';
+    input.onchange = async function() {
+        var f = input.files[0];
+        if (!f) return;
+        if (f.size > MAX_SIZE) { showToast(f.name + ' 超过50MB', 'error'); return; }
+        showToast('正在上传 ' + f.name + ' ...', 'success');
+        var fd = new FormData(); fd.append('file', f);
+        try {
+            var upRes = await fetch(UPLOAD_API, {method:'POST', body:fd});
+            if (!upRes.ok) { var eu = await _readError(upRes); showToast('上传失败: '+eu, 'error'); return; }
+            var upData = await upRes.json();
+            var filename = upData.filename || f.name;
+            showToast('上传完成, 开始全自动导入...', 'success');
+            loadHistory();
+            await autoUploadForFile(filename);
+        } catch(e) { showToast('上传异常: '+e.message, 'error'); }
+    };
+    input.click();
+}
+
+// [FEAT] 全自动导入 — 打开弹窗，逐步输出日志，展示每个环节的数据
+async function autoUploadForFile(filename) {
+    openAutoLog('全自动导入: ' + filename);
+    _log('▶', 'step', '开始全自动导入 <b>'+escHtml(filename)+'</b>');
+    _log('ℹ', 'info', '解析模型: <em>'+escHtml(document.getElementById('parseModel').selectedOptions[0]?.text||'—')+'</em>');
+    _logDivider();
+
+    // ═══════════════════════════════════════
+    // Step 1: AI 解析
+    // ═══════════════════════════════════════
+    _log('①', 'step', '<b>AI 本体解析</b> — 调用大模型识别实体类型、提取字段');
+    var parseData;
+    var t0 = Date.now();
+    try {
+        var parseRes = await fetch(UPLOAD_API + '/parse', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename, model: document.getElementById('parseModel').value }),
+        });
+        if (!parseRes.ok) {
+            var pe = await _readError(parseRes);
+            _log('✗', 'err', '解析失败: <b>'+escHtml(pe)+'</b>');
+            showToast('解析失败: ' + pe, 'error'); return;
+        }
+        parseData = await parseRes.json();
+    } catch (e) {
+        _log('✗', 'err', '解析异常: <b>'+escHtml(e.message)+'</b>');
+        _log('✗', 'err', '异常详情: <span style="font-size:0.65rem;color:#888;">'+escHtml(e.stack||e.toString())+'</span>');
+        showToast('解析异常: ' + e.message, 'error'); return;
+    }
+    var t1 = Date.now();
+    _log('✓', 'ok', '解析完成 — 耗时 <b>'+((t1-t0)/1000).toFixed(1)+'s</b>');
+
+    // 分块信息
+    if (parseData.chunks_total > 0) {
+        _log('ℹ', 'info', '文件分块: 共 <b>'+parseData.chunks_total+'</b> 块, 成功 <b style="color:#22c55e;">'+parseData.chunks_success+'</b> 块'
+            + (parseData.chunks_failed > 0 ? ', 失败 <b style="color:#ef4444;">'+parseData.chunks_failed+'</b> 块' : ''));
+    }
+
+    if (!parseData.entities || parseData.entities.length === 0) {
+        _log('✗', 'err', '未解析出任何实体');
+        if (parseData.chunks_failed > 0 && parseData.chunk_errors) {
+            parseData.chunk_errors.forEach(function(e) {
+                _log('⚠', 'warn', '分块#'+e.chunk_index+' 失败: '+escHtml(e.reason||'未知'));
+            });
+        }
+        showToast('未解析出实体', 'error'); return;
+    }
+
+    var entities = parseData.entities || [];
+    var relationships = parseData.relationships || [];
+    _log('✓', 'ok', '解析产出: 实体 <b>'+entities.length+'</b> 个, 关系 <b>'+relationships.length+'</b> 条');
+
+    // 类型分布
+    var typeCounts = parseData.type_counts || {};
+    var typeList = Object.entries(typeCounts).map(function(e){return ONT_TYPE_NAMES[e[0]]||e[0];}).join(', ');
+    if (typeList) _log('ℹ', 'info', '类型分布: '+typeList);
+
+    // 实体列表
+    if (entities.length > 0) {
+        var entRows = [];
+        for (var ei = 0; ei < Math.min(entities.length, 30); ei++) {
+            var e = entities[ei];
+            var ont = e.ont_type || 'M_ENTITY';
+            var tpName = ONT_TYPE_NAMES[ont] || ont;
+            var props = e.properties || {};
+            var propStr = Object.keys(props).filter(function(k){return k!=='name';}).map(function(k){
+                return k + (props[k] ? '='+String(props[k]).substring(0,15) : '');
+            }).join(' · ') || '—';
+            entRows.push(['#'+(ei+1), escHtml(String(e.name||'').substring(0,40)), escHtml(tpName), escHtml(propStr.substring(0,60))]);
+        }
+        if (entities.length > 30) entRows.push(['...', '... 共 '+entities.length+' 个实体', '', '']);
+        _logTable(['#','名称','类型','属性字段'], entRows);
+    }
+
+    // 关系列表
+    if (relationships.length > 0) {
+        var relRows = [];
+        for (var ri = 0; ri < Math.min(relationships.length, 20); ri++) {
+            var r = relationships[ri];
+            var s = r.subject || r.start_node_id || '';
+            var p = r.predicate || r.type || '';
+            var o = r.object || r.end_node_id || '';
+            relRows.push([escHtml(String(s).substring(0,28)), escHtml(String(p).substring(0,20)), escHtml(String(o).substring(0,28))]);
+        }
+        if (relationships.length > 20) relRows.push(['...','... 共 '+relationships.length+' 条','...']);
+        _logTable(['主体','谓词','客体'], relRows);
+    }
+    _logDivider();
+
+    // ═══════════════════════════════════════
+    // Step 2: 校验 & 补全
+    // ═══════════════════════════════════════
+    _log('②', 'step', '<b>模板校验 & 字段补全</b> — 匹配 ontol_model 模板，检测缺失字段');
+    var unknownWarn = '', filledTotal = 0;
+    try {
+        var valRes = await fetch(UPLOAD_API + '/validate-entities', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entities: entities }),
+        });
+        if (valRes.ok) {
+            var valData = await valRes.json();
+            _log('✓', 'ok', '校验完成: '+escHtml(valData.summary||''));
+            var missings = valData.missing_fields || [];
+            var unknowns = valData.unknown_types || [];
+
+            // 未匹配类型
+            if (unknowns.length > 0) {
+                unknownWarn = unknowns.map(function(u){return u.ont_type;}).join(', ');
+                _log('⚠', 'warn', '以下类型未匹配模板，将以默认标签 <em>Entity</em> 导入: <b>'+escHtml(unknownWarn)+'</b>');
+            }
+
+            // 缺失字段 & 补全
+            if (missings.length > 0) {
+                for (var mi = 0; mi < missings.length; mi++) {
+                    var mf = missings[mi];
+                    var ent = entities.find(function(e){return e.name===mf.entity_name;});
+                    if (!ent || !ent.properties) continue;
+                    var filledNames = [];
+                    for (var fi = 0; fi < mf.missing.length; fi++) {
+                        var f = mf.missing[fi];
+                        if (!ent.properties[f.code] && f.default) {
+                            ent.properties[f.code] = f.default;
+                            filledNames.push(f.name||f.code);
+                            filledTotal++;
+                        }
+                    }
+                    if (filledNames.length > 0) {
+                        _log('📋', 'info', '补全 <b>'+escHtml(mf.entity_name)+'</b> ('+(mf.type_name||mf.ont_type)+'): '+filledNames.map(function(n){return '<em>'+escHtml(n)+'</em>';}).join(', '));
+                    }
+                }
+            }
+            if (filledTotal > 0) {
+                _log('✓', 'ok', '共补全 <b>'+filledTotal+'</b> 个缺失字段');
+            }
+            if (missings.length === 0 && unknowns.length === 0) {
+                _log('✓', 'ok', '所有实体类型匹配，字段完整 ✅');
+            }
+        } else {
+            _log('⚠', 'warn', '校验接口返回异常，跳过校验直接导入');
+        }
+    } catch (ve) {
+        _log('⚠', 'warn', '校验请求异常: <b>'+escHtml(ve.message||ve)+'</b>，跳过校验直接导入');
+    }
+    _logDivider();
+
+    // ═══════════════════════════════════════
+    // Step 3: 符号语言填充 & 推理机校验
+    // ═══════════════════════════════════════
+    _log('③', 'step', '<b>逻辑行为属性填充 & 推理机校验</b> — 7种符号语言识别 + 边属性填充 + 结构校验');
+    try {
+        var enrichRes = await fetch(UPLOAD_API + '/enrich-entities', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entities: entities, relationships: relationships }),
+        });
+        if (enrichRes.ok) {
+            var enrichData = await enrichRes.json();
+            // 回写富化后的数据（边属性已填充）
+            entities = enrichData.entities || entities;
+            relationships = enrichData.relationships || relationships;
+            var symbolStats = enrichData.symbol_stats || {};
+            var enrichWarns = enrichData.warnings || [];
+            var edgeFilled = enrichData.edge_props_filled || 0;
+            var nodeSymbols = enrichData.node_symbols_found || 0;
+
+            // 符号语言统计
+            var prefixNames = {rdfs:'RDFS',owl2:'OWL2',swrl:'SWRL',shacl:'SHACL',rule:'规则设定',func:'动态函数',jsonpath:'JSONPath'};
+            var statLines = Object.keys(symbolStats).map(function(k){
+                return '<em>'+escHtml(prefixNames[k]||k)+'</em>×'+symbolStats[k];
+            }).join(' · ');
+            if (statLines) {
+                _log('✓', 'ok', '符号语言识别: '+statLines);
+            } else {
+                _log('ℹ', 'info', '未检测到7种符号语言属性 (RDFS/OWL2/SWRL/SHACL/规则/动态函数/JSONPath)');
+            }
+            if (edgeFilled > 0) {
+                _log('✓', 'ok', '边属性填充: <b>'+edgeFilled+'</b> 条关系已补全标准属性 (actionType/validationType/ruleId/msg)');
+            }
+            if (nodeSymbols > 0) {
+                _log('✓', 'ok', '节点符号属性: <b>'+nodeSymbols+'</b> 个属性值标记了符号语言');
+            }
+
+            // 推理机结构校验告警
+            if (enrichWarns.length > 0) {
+                for (var wi = 0; wi < enrichWarns.length; wi++) {
+                    var w = enrichWarns[wi];
+                    var wicon = w.level==='error'?'✗':'⚠';
+                    var wcls = w.level==='error'?'err':'warn';
+                    _log(wicon, wcls, '['+escHtml(w.level)+'] <b>'+escHtml(w.target)+'</b>: '+escHtml(w.message));
+                }
+            }
+            if (enrichData.error_count === 0 && enrichData.warn_count === 0) {
+                _log('✓', 'ok', '推理机结构校验通过 — 符号语言表达式格式正确 ✅');
+            }
+        } else {
+            var ee = await _readError(enrichRes);
+            _log('⚠', 'warn', '符号语言填充异常: '+escHtml(ee)+'，跳过继续导入');
+        }
+    } catch (ee) {
+        _log('⚠', 'warn', '符号语言填充请求异常: <b>'+escHtml(ee.message||ee)+'</b>，跳过继续导入');
+    }
+    _logDivider();
+
+    // ═══════════════════════════════════════
+    // Step 4: 导入图数据库
+    // ═══════════════════════════════════════
+    _log('④', 'step', '<b>导入 Memgraph 图数据库</b> — 节点 + 关系 + 场景绑定');
+
+    // 获取默认场景
+    var sceneIds = [];
+    try {
+        var sceneRes = await fetch('/api/v1/scenes');
+        if (sceneRes.ok) {
+            var scenes = await sceneRes.json();
+            var defScene = scenes.find(function(s){return s.scene_is_system==='1';});
+            if (defScene) {
+                sceneIds = [defScene.id];
+                _log('ℹ', 'info', '默认场景: <b>'+escHtml(defScene.name)+'</b>');
+            } else {
+                _log('⚠', 'warn', '未找到默认系统场景，不绑定');
+            }
+        }
+    } catch (se) {
+        _log('⚠', 'warn', '获取场景列表异常，不绑定');
+    }
+
+    var t2 = Date.now();
+    try {
+        var impRes = await fetch(UPLOAD_API + '/import-entities', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: parseData.filename || filename,
+                entities: entities,
+                relationships: relationships,
+                scene_ids: sceneIds,
+            }),
+        });
+        if (!impRes.ok) {
+            var ie = await _readError(impRes);
+            _log('✗', 'err', '导入失败: <b>'+escHtml(ie)+'</b>');
+            showToast('导入失败: '+ie, 'error'); return;
+        }
+        var impData = await impRes.json();
+        var t3 = Date.now();
+
+        // ── 汇总面板 ──
+        _log('✓', 'ok', '导入完成 — 耗时 <b>'+((t3-t2)/1000).toFixed(1)+'s</b>');
+        _logSummary([
+            ['📦 实体解析', entities.length+' 个', ''],
+            ['🔗 关系抽取', relationships.length+' 条', ''],
+            ['🏷️  Memgraph 节点', impData.nodes_created+' 个', 'green'],
+            ['🔀 Memgraph 关系', impData.edges_created+' 条', 'green'],
+            ['📝 字段补全', (impData.filled_fields||0)+' 个', filledTotal>0?'amber':''],
+            ['📋 场景绑定', (impData.scene_bind_count||0)+' 条', impData.scene_bind_count>0?'amber':''],
+            ['🗄️  目标数据库', 'Memgraph (图节点+边) + SQLite (节点-场景关系)', ''],
+        ]);
+        if (unknownWarn) {
+            document.getElementById('autoLogSummary').insertAdjacentHTML('beforeend',
+                '<div style="font-size:0.68rem;color:#f59e0b;margin-top:0.3rem;padding-left:0.7rem;">⚠ 未匹配模板: '+escHtml(unknownWarn)+' — 已使用默认标签 <em>Entity</em></div>');
+        }
+
+        showToast('✅ 全自动完成: '+impData.nodes_created+' 节点 · '+impData.edges_created+' 关系', 'success');
+        loadHistory();
+    } catch (e) {
+        _log('✗', 'err', '导入失败: <b>'+escHtml(e.message)+'</b>');
+        showToast('导入失败: '+e.message, 'error');
+    }
+}
+// [FIX] 只能通过 ✕ 关闭按钮关闭弹窗，取消点击遮罩+Esc关闭 — 影响范围：全自动导入日志弹窗
+
 // ── 历史 ──
 async function loadHistory() {
     try {
@@ -752,6 +1129,7 @@ async function loadHistory() {
                 </div>
                 <div class="haction">
                     <button class="hbtn" onclick="event.stopPropagation();parseFile(${jsStr(h.filename)})" title="AI 解析三元组">🔍</button>
+                    <button class="hbtn" onclick="event.stopPropagation();autoUploadForFile(${jsStr(h.filename)})" title="全自动导入">🤖</button>
                     <a class="hbtn" href="${UPLOAD_API}/preview/${encodeURIComponent(h.filename)}" download="${escHtml(h.filename)}" title="下载" onclick="event.stopPropagation()">⬇</a>
                     <button class="hbtn danger" onclick="event.stopPropagation();deleteFile(${jsStr(h.filename)})" title="删除">🗑</button>
                 </div>

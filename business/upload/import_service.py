@@ -40,34 +40,8 @@ async def import_entities_to_graph(
     scene_bind_count = 0
 
     async with driver.session() as session:
-        # 1. 收集已有 ID
-        existing_ids: set[int] = set()
-        try:
-            node_result = await session.run(
-                "MATCH (n) WHERE n.id IS NOT NULL RETURN DISTINCT n.id AS nid"
-            )
-            async for rec in node_result:
-                val = rec.get("nid")
-                if val is not None:
-                    try:
-                        existing_ids.add(int(val))
-                    except (ValueError, TypeError):
-                        pass
-            edge_result = await session.run(
-                "MATCH ()-[r]->() WHERE r.id IS NOT NULL RETURN DISTINCT r.id AS rid"
-            )
-            async for rec in edge_result:
-                val = rec.get("rid")
-                if val is not None:
-                    try:
-                        existing_ids.add(int(val))
-                    except (ValueError, TypeError):
-                        pass
-        except Exception:
-            pass
-
-        # 2. 雪花 ID 映射
-        id_map = generate_snowflake_ids(entities, relationships, existing_ids)
+        # 1. 收集实体中待替换的 LLM 随机 ID → 雪花 ID 映射
+        id_map = generate_snowflake_ids(entities)
 
         # 3. 替换实体的 properties.id
         for ent in entities:
@@ -120,9 +94,10 @@ async def import_entities_to_graph(
 
         # 6. 创建关系
         for rel in relationships:
-            subj = (rel.get("start_node_id") or rel.get("subject") or "").strip()
-            pred = (rel.get("type") or rel.get("predicate") or "").strip()
-            obj = (rel.get("end_node_id") or rel.get("object") or "").strip()
+            # [FIX] 防御性 str() 包装: 防止上游意外传入整数类型导致 .strip() 抛 AttributeError
+            subj = str(rel.get("start_node_id") or rel.get("subject") or "").strip()
+            pred = str(rel.get("type") or rel.get("predicate") or "").strip()
+            obj = str(rel.get("end_node_id") or rel.get("object") or "").strip()
             if not subj or not pred or not obj:
                 continue
             safe_pred = pred.replace("`", "").replace(" ", "_")

@@ -100,15 +100,15 @@ async def get_outgoing_by_rel_type(node_id: int, rel_type: str) -> list[dict]:
 
 # ---- 写操作 ----
 
-async def clone_node(original_id: int, cope_version: str, cm: dict[int, tuple[dict, int]]) -> int:
-    """克隆节点到副本空间（cope_version 注入）。cm: {原生ID: (原节点, 副本ID)}。"""
+async def clone_node(original_id: int, copy_version: str, cm: dict[int, tuple[dict, int]]) -> int:
+    """克隆节点到副本空间（copy_version 注入）。cm: {原生ID: (原节点, 副本ID)}。"""
     if original_id in cm:
         return cm[original_id][1]
     node = await get_node(original_id)
     if node is None:
         raise GraphQueryError(f"Node {original_id} not found for cloning")
     props = dict(node["props"])
-    props["cope_version"] = cope_version
+    props["copy_version"] = copy_version
     labels_str = ":".join(node["labels"])
     driver = await get_driver()
     async with driver.session() as session:
@@ -154,6 +154,29 @@ def merge_inherited_props(ancestor_chain: list[dict], seed: dict) -> dict:
         merged.update(a.get("props", {}))
     merged.update(seed.get("props", {}))
     return merged
+
+
+# ---- 推理链遍历 ----
+
+async def walk_inference_chain(node_id: int, result: list[dict], visited: set[int]) -> None:
+    """沿 actionType=inference 边递归下探，收集所有推理下游节点。
+
+    使用 DFS 遍历图，visited 集合防止环路导致无限递归。
+    结果按发现顺序追加到 result 列表中。
+
+    Args:
+        node_id: 当前节点原生 ID
+        result: 下游节点列表（原地追加）
+        visited: 已访问节点 ID 集合（原地修改，防环）
+    """
+    if node_id in visited:
+        return
+    visited.add(node_id)
+    records = await get_outgoing_inference_edges(node_id)
+    for r in records:
+        ds = {"id": r["id"], "labels": r["labels"], "props": r["props"]}
+        result.append(ds)
+        await walk_inference_chain(r["id"], result, visited)
 
 
 # ---- Cypher 裸执行 ----

@@ -485,7 +485,7 @@ function renderApp() {
         const onConnect = React.useCallback((params) => {
             // 自动创建关系连线 — 默认类型「协同」
             var connProps = {};
-            if (copeModeId) connProps.cope_version = copeModeId;
+            if (copeModeId) connProps.copy_version = copeModeId;
             api('/edges', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -775,7 +775,7 @@ async function wargameStart() {
         var inferBody = {
             node_ids: initNodeId ? [initNodeId] : [],
             confidence: confVal,
-            cope_version: copeModeId,
+            copy_version: copeModeId,
         };
         var inferUrl = '/api/v1/infer-on-nodes';
         console.log('🚀 推演副本推理 — 请求:', inferUrl, inferBody);
@@ -1254,7 +1254,7 @@ async function resetCopeNodes() {
                 newProps[keys[k]] = origProps[keys[k]];
             }
             newProps.graph_id = u.graphId;
-            newProps.cope_version = copeModeId;
+            newProps.copy_version = copeModeId;
             await fetch(API + '/nodes/' + u.nodeId, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -1450,7 +1450,7 @@ async function createEdge() {
     if (srcId === tgtId) { alert('源实体和目标实体不能相同'); return; }
     try {
         var edgeProps = {};
-        if (copeModeId) edgeProps.cope_version = copeModeId;
+        if (copeModeId) edgeProps.copy_version = copeModeId;
         await api('/edges', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ source_id: srcId, target_id: tgtId, rel_type: relType, properties: edgeProps }) });
         closeSidebar();
         if (_lastNeighborId) { loadNeighborhood(_lastNeighborId); } else { loadAndRender(); }
@@ -1571,7 +1571,7 @@ async function createNode() {
     const code = document.getElementById('newCode')?.value?.trim();
     const props = { name };
     if (code) props.code = code;
-    if (copeModeId) props.cope_version = copeModeId;
+    if (copeModeId) props.copy_version = copeModeId;
     try { await api('/nodes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label, properties: props }) }); closeSidebar(); loadAndRender(); }
     catch (e) { alert('创建失败: ' + e.message); }
 }
@@ -1618,9 +1618,9 @@ async function insertNodeOnEdge() {
         }
     });
 
-    if (copeModeId) props.cope_version = copeModeId;
+    if (copeModeId) props.copy_version = copeModeId;
     var insEdgeProps = {};
-    if (copeModeId) insEdgeProps.cope_version = copeModeId;
+    if (copeModeId) insEdgeProps.copy_version = copeModeId;
     try {
         // 1. 创建中间实体
         const newNode = await api('/nodes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label: midLabel, properties: props }) });
@@ -1798,7 +1798,7 @@ let pendingDelCopeNodesId = null;
 function promptDelCopeNodes(copeId, name) {
     pendingDelCopeNodesId = copeId;
     document.getElementById('copeDelNodesMsg').textContent =
-        '确定删除副本「' + name + '」在图数据库中的所有节点吗？\n\n将删除 Memgraph 中所有 cope_version = "' + copeId + '" 的节点。此操作不可恢复！';
+        '确定删除副本「' + name + '」在图数据库中的所有节点吗？\n\n将删除 Memgraph 中所有 copy_version = "' + copeId + '" 的节点。此操作不可恢复！';
     document.getElementById('copeDelNodesModal').style.display = 'flex';
 }
 

@@ -702,7 +702,7 @@ async function wargameStart() {
 
     const confEnabled = document.getElementById('confidenceEnable')?.checked;
     const conf = confEnabled ? (parseFloat(document.getElementById('confidenceVal')?.value || '0.00') || 0.00) : null;
-    const copeVersion = nodeProps.cope_version || nodeProps.version || '0';
+    const copeVersion = nodeProps.copy_version || nodeProps.version || '0';
 
     // 构建上下文参数（场景或对话，互斥）
     const ctxArgs = {};
@@ -718,7 +718,7 @@ async function wargameStart() {
 
     const inferPayload = {
         name: 'infer_forward',
-        arguments: { code: nodeCode, name: nodeName, relation, cope_version: copeVersion, depth: 3, direction: 'outgoing', ...(conf !== null ? { confidence_threshold: conf } : {}), ...ctxArgs },
+        arguments: { code: nodeCode, name: nodeName, relation, copy_version: copeVersion, depth: 3, direction: 'outgoing', ...(conf !== null ? { confidence_threshold: conf } : {}), ...ctxArgs },
     };
     console.group('%c⚔️ 沙盘推演 %c' + nodeName,
         'color:#f59e0b;font-weight:bold', 'color:#d4d0c0');

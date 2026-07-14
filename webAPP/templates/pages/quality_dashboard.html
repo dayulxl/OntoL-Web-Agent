@@ -1,0 +1,474 @@
+{% extends "base.html" %}
+{% block title %}首页 — OntoL{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.qd-layout {
+  min-height: calc(100vh - 60px);
+  background: rgba(8,12,32,0.96);
+  padding: 1.5rem 2rem;
+}
+
+/* ── 顶部总览 ── */
+.qd-hero {
+  display: flex; align-items: center; gap: 2rem; margin-bottom: 1.5rem;
+  padding: 1.5rem 2rem;
+  background: linear-gradient(135deg, rgba(0,212,255,0.05), rgba(124,58,237,0.05));
+  border: 1px solid var(--border); border-radius: 12px;
+}
+.qd-score-ring { width: 120px; height: 120px; flex-shrink: 0; }
+.qd-score-ring .bg { fill: none; stroke: rgba(0,212,255,0.1); stroke-width: 8; }
+.qd-score-ring .fg { fill: none; stroke-width: 8; stroke-linecap: round;
+  transform: rotate(-90deg); transform-origin: center;
+  transition: stroke-dashoffset 1s ease; }
+.qd-score-text { font-size: 2rem; font-weight: 700; fill: #fff; text-anchor: middle; dominant-baseline: central; }
+.qd-hero-info h2 { font-size: 1.3rem; margin: 0 0 0.3rem; color: #fff; }
+.qd-hero-info .subtitle { font-size: 0.85rem; color: var(--text-dim); max-width: 500px; }
+.qd-hero-info .time { font-size: 0.72rem; color: var(--text-dim); opacity: 0.7; margin-top: 0.3rem; }
+.status-badge {
+  display: inline-block; padding: 0.2rem 0.8rem; border-radius: 12px;
+  font-size: 0.8rem; font-weight: 600; margin-top: 0.3rem;
+}
+.status-good { background: rgba(34,197,94,0.15); color: #22c55e; }
+.status-warning { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.status-bad { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+/* ── 统计卡片 ── */
+.qd-kpis { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+.qd-kpi {
+  flex: 1; min-width: 160px; padding: 1.2rem;
+  border-radius: 10px; border: 1px solid var(--border);
+  background: rgba(0,212,255,0.02);
+  transition: all 0.2s;
+}
+.qd-kpi:hover { border-color: var(--accent); transform: translateY(-2px); }
+.qd-kpi .kpi-icon { font-size: 1.6rem; margin-bottom: 0.3rem; }
+.qd-kpi .kpi-val { font-size: 1.6rem; font-weight: 700; color: #fff; }
+.qd-kpi .kpi-label { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.qd-kpi .kpi-bar {
+  height: 4px; border-radius: 2px; margin-top: 0.5rem; background: rgba(0,212,255,0.08);
+  overflow: hidden;
+}
+.qd-kpi .kpi-bar-inner { height: 100%; border-radius: 2px; transition: width 0.8s ease; }
+.qd-kpi.good .kpi-val { color: #22c55e; }.qd-kpi.good .kpi-bar-inner { background: #22c55e; }
+.qd-kpi.warning .kpi-val { color: #f59e0b; }.qd-kpi.warning .kpi-bar-inner { background: #f59e0b; }
+.qd-kpi.bad .kpi-val { color: #ef4444; }.qd-kpi.bad .kpi-bar-inner { background: #ef4444; }
+
+/* ── 图表区 ── */
+.qd-charts { display: grid; gap: 1.2rem; margin-bottom: 1.5rem; }
+.qd-charts.row2 { grid-template-columns: 1fr 1fr; }
+.qd-chart-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 1.2rem; background: rgba(0,212,255,0.02);
+}
+.qd-chart-card h4 { font-size: 0.85rem; color: var(--text-dim); margin: 0 0 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.qd-chart-card canvas { max-height: 240px; }
+
+/* ── 问题列表 ── */
+.qd-issue {
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  padding: 0.5rem 0.8rem; border-radius: 6px; margin-bottom: 0.3rem;
+  font-size: 0.8rem; background: rgba(0,212,255,0.02);
+  border: 1px solid transparent;
+}
+.qd-issue.level-error { background: rgba(239,68,68,0.05); border-color: rgba(239,68,68,0.15); }
+.qd-issue.level-warning { background: rgba(245,158,11,0.05); border-color: rgba(245,158,11,0.15); }
+.qd-issue.level-info { background: rgba(0,212,255,0.03); border-color: rgba(0,212,255,0.08); }
+.qd-issue .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 0.35rem; }
+.qd-issue.level-error .dot { background: #ef4444; }
+.qd-issue.level-warning .dot { background: #f59e0b; }
+.qd-issue.level-info .dot { background: var(--accent); }
+
+/* ── 详情表格 ── */
+.qd-tables { display: grid; gap: 1.2rem; grid-template-columns: 1fr 1fr; }
+.qd-table-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 1.2rem; background: rgba(0,212,255,0.02);
+}
+.qd-table-card h4 { font-size: 0.85rem; color: var(--text-dim); margin: 0 0 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
+.qd-table-card h4 .arrow { transition: transform 0.2s; font-size: 0.7rem; }
+.qd-table-card h4.collapsed .arrow { transform: rotate(-90deg); }
+.qd-table-wrap { overflow-x: auto; max-height: 300px; overflow-y: auto; }
+.qd-table-wrap.hidden { display: none; }
+.qd-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.qd-table th {
+  text-align: left; padding: 0.4rem 0.5rem; color: var(--accent);
+  background: rgba(0,212,255,0.05); font-size: 0.68rem;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1;
+}
+.qd-table td { padding: 0.35rem 0.5rem; border-bottom: 1px solid rgba(0,212,255,0.04); color: var(--text); }
+.qd-table tr:hover td { background: rgba(0,212,255,0.03); }
+.qd-table .zero { color: #ef4444; font-weight: 600; }
+.badge-sys { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 8px; background: rgba(0,212,255,0.1); color: var(--accent); }
+.badge-custom { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 8px; background: rgba(124,58,237,0.1); color: #a78bfa; }
+
+/* ── 表统计 ── */
+.qd-tbl-counts { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.2rem; }
+.qd-tbl-count {
+  padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.7rem;
+  background: rgba(0,212,255,0.04); border: 1px solid rgba(0,212,255,0.1);
+  color: var(--text-dim);
+}
+.qd-tbl-count strong { color: var(--accent); font-weight: 600; }
+
+/* ── 刷新按钮 ── */
+.qd-refresh-btn {
+  font-size: 0.75rem; padding: 0.35rem 0.8rem; margin-left: auto;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(0,212,255,0.06); color: var(--text-dim);
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.qd-refresh-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.12); }
+
+/* ── 进度条动画 ── */
+@keyframes qd-progress { from { width: 0; } }
+
+@media (max-width: 1024px) {
+  .qd-charts.row2, .qd-tables { grid-template-columns: 1fr; }
+  .qd-kpis { flex-wrap: wrap; }
+  .qd-hero { flex-direction: column; text-align: center; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="qd-layout">
+
+  <!-- ── 顶部总览 ── -->
+  <div class="qd-hero">
+    <svg class="qd-score-ring" viewBox="0 0 120 120">
+      <circle class="bg" cx="60" cy="60" r="52"/>
+      <circle class="fg" id="scoreRing" cx="60" cy="60" r="52"
+        stroke="#f59e0b" stroke-dasharray="326.7" stroke-dashoffset="94"/>
+      <text class="qd-score-text" x="60" y="60" id="scoreText">71</text>
+    </svg>
+    <div class="qd-hero-info">
+      <h2>数据质量分析报告</h2>
+      <div class="subtitle" id="heroSummary">加载中...</div>
+      <div><span class="status-badge status-warning" id="heroStatus">良好</span></div>
+      <div class="time">生成时间：<span id="heroTime">—</span></div>
+    </div>
+    <button class="qd-refresh-btn" onclick="loadQualityData()">🔄 刷新</button>
+  </div>
+
+  <!-- ── 统计卡片 ── -->
+  <div class="qd-kpis" id="kpiRow"></div>
+
+  <!-- ── 图表 ── -->
+  <div class="qd-charts row2">
+    <div class="qd-chart-card">
+      <h4>📊 维度评分分布</h4>
+      <div id="chart-dim-bar"></div>
+    </div>
+    <div class="qd-chart-card">
+      <h4>🥧 本体模型类型分布</h4>
+      <div id="chart-type-pie"></div>
+    </div>
+  </div>
+
+  <div class="qd-charts row2">
+    <div class="qd-chart-card">
+      <h4>📈 数据变更趋势</h4>
+      <div id="chart-trend"></div>
+    </div>
+    <div class="qd-chart-card">
+      <h4>⚠️ 问题概览</h4>
+      <div id="issuesList">
+        <div style="color:var(--text-dim);font-size:0.78rem;padding:1rem;text-align:center">加载中...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 表统计 ── -->
+  <div class="qd-tbl-counts" id="tableCounts"></div>
+
+  <!-- ── 详情表格 ── -->
+  <div class="qd-tables" id="detailTables">
+    <div style="color:var(--text-dim);grid-column:1/-1;text-align:center;padding:2rem">加载详情数据...</div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', path='tool/FrappeCharts/frappe-charts.min.js') }}"></script>
+<script>
+// ====================================================================
+// 数据质量仪表板 — 纯原生 JS
+// ====================================================================
+
+var C = 2 * Math.PI * 52; // SVG 环形总分周长
+var charts = {};
+
+// ── 辅助 ──
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function $id(id) { return document.getElementById(id); }
+
+// ── 占位假数据 (避免页面空) ──
+var PLACEHOLDER = {
+  overall_score: 0,
+  summary: "正在分析数据质量...",
+  generated_at: "—",
+  dimensions: [
+    {name:"completeness",label:"完整性",score:0,status:"bad",detail:"加载中...",issues:[]},
+    {name:"consistency",label:"一致性",score:0,status:"warning",detail:"加载中...",issues:[]},
+    {name:"uniqueness",label:"唯一性",score:0,status:"good",detail:"加载中...",issues:[]},
+    {name:"freshness",label:"时效性",score:0,status:"good",detail:"加载中...",issues:[]},
+    {name:"coverage",label:"覆盖率",score:0,status:"warning",detail:"加载中...",issues:[]},
+  ],
+  table_counts: {},
+  chart_data: {
+    bar: {labels:[],datasets:[{name:"",values:[]}]},
+    pie: {labels:[],datasets:[{name:"",values:[]}]},
+    trend: {labels:[],datasets:[{name:"",values:[]}]},
+  },
+  detail_tables: {
+    model_attrs: [], missing_attr_models: [],
+    recent_changes: [], scene_prompts: [],
+  },
+};
+
+var ICONS = {completeness:'📋',consistency:'🔗',uniqueness:'🆔',freshness:'🕐',coverage:'📡'};
+
+// ── 主流程 ──
+loadQualityData();
+
+function loadQualityData() {
+  // 先用占位数据渲染骨架
+  renderAll(PLACEHOLDER);
+
+  fetch('/api/v1/quality/report')
+    .then(function(r) {
+      if (!r.ok) throw new Error(r.statusText);
+      return r.json();
+    })
+    .then(function(json) {
+      if (json.code === 200 && json.data) {
+        renderAll(json.data);
+      }
+    })
+    .catch(function(e) {
+      console.error('Data quality API error:', e);
+      $id('heroSummary').textContent = 'API 加载失败: ' + escHtml(e.message);
+    });
+}
+
+// ── 全量渲染 ──
+function renderAll(report) {
+  renderHero(report);
+  renderKPIs(report);
+  renderIssues(report);
+  renderTableStats(report);
+  renderDetailTables(report);
+  renderCharts(report);
+}
+
+// ── 顶部 Hero ──
+function renderHero(report) {
+  var s = Math.round(report.overall_score || 0);
+  var color = s >= 80 ? '#22c55e' : s >= 50 ? '#f59e0b' : '#ef4444';
+  var label = s >= 80 ? '优秀' : s >= 60 ? '良好' : s >= 40 ? '需改进' : '较差';
+  var cls = s >= 80 ? 'good' : s >= 50 ? 'warning' : 'bad';
+
+  var ring = $id('scoreRing');
+  ring.setAttribute('stroke', color);
+  ring.setAttribute('stroke-dashoffset', C * (1 - s / 100));
+
+  $id('scoreText').textContent = s;
+  $id('heroSummary').textContent = report.summary || '';
+  $id('heroTime').textContent = report.generated_at || '—';
+
+  var badge = $id('heroStatus');
+  badge.textContent = label;
+  badge.className = 'status-badge status-' + cls;
+}
+
+// ── KPI 卡片 ──
+function renderKPIs(report) {
+  var dims = report.dimensions || [];
+  var html = '';
+  for (var i = 0; i < dims.length; i++) {
+    var d = dims[i];
+    html += '<div class="qd-kpi ' + (d.status||'') + '">' +
+      '<div class="kpi-icon">' + (ICONS[d.name]||'📌') + '</div>' +
+      '<div class="kpi-val">' + Math.round(d.score) + '分</div>' +
+      '<div class="kpi-label">' + escHtml(d.label) + '</div>' +
+      '<div class="kpi-bar"><div class="kpi-bar-inner" style="width:' + d.score + '%"></div></div>' +
+      '</div>';
+  }
+  $id('kpiRow').innerHTML = html;
+}
+
+// ── 问题列表 ──
+function renderIssues(report) {
+  var dims = report.dimensions || [];
+  var html = '';
+  var total = 0;
+  for (var i = 0; i < dims.length; i++) {
+    var issues = dims[i].issues || [];
+    for (var j = 0; j < issues.length; j++) {
+      var iss = issues[j];
+      html += '<div class="qd-issue level-' + (iss.level||'info') + '">' +
+        '<span class="dot"></span>' +
+        '<span>' + escHtml(iss.msg) + '</span></div>';
+      total++;
+    }
+  }
+  if (total === 0) {
+    html = '<div style="color:var(--text-dim);font-size:0.78rem;padding:1rem;text-align:center">✅ 未发现质量问题</div>';
+  }
+  $id('issuesList').innerHTML = html;
+}
+
+// ── 表统计 ──
+function renderTableStats(report) {
+  var counts = report.table_counts || {};
+  var keys = Object.keys(counts).sort();
+  var html = '';
+  for (var i = 0; i < keys.length; i++) {
+    html += '<div class="qd-tbl-count"><strong>' + counts[keys[i]] + '</strong> ' + escHtml(keys[i]) + '</div>';
+  }
+  $id('tableCounts').innerHTML = html;
+}
+
+// ── 详情表格 ──
+function renderDetailTables(report) {
+  var dt = report.detail_tables || {};
+  var html = '';
+
+  // 模型属性概览
+  html += _tblSection('Model属性概览', 'model-attrs', true,
+    ['模型','类型','来源','属性数','系统','自定义'],
+    (dt.model_attrs||[]).map(function(m) {
+      return [
+        escHtml(m.name), escHtml(m.type),
+        '<span class="' + (m.is_system==='系统'?'badge-sys':'badge-custom') + '">' + escHtml(m.is_system) + '</span>',
+        '<span class="' + (m.attr_count===0?'zero':'') + '">' + m.attr_count + '</span>',
+        m.system_attrs, m.custom_attrs,
+      ];
+    })
+  );
+
+  // 场景提示词覆盖
+  html += _tblSection('场景提示词覆盖率', 'scene-prompts', true,
+    ['场景','来源','提示词数'],
+    (dt.scene_prompts||[]).map(function(s) {
+      return [
+        escHtml(s.name),
+        '<span class="' + (s.is_system==='系统'?'badge-sys':'badge-custom') + '">' + escHtml(s.is_system) + '</span>',
+        '<span class="' + (s.prompt_count===0?'zero':'') + '">' + s.prompt_count + '</span>',
+      ];
+    })
+  );
+
+  // 缺少属性的模型
+  var missing = dt.missing_attr_models || [];
+  if (missing.length > 0) {
+    html += _tblSection('⚠️ 缺少属性的模型 ('+missing.length+')', 'missing-attrs', true,
+      ['ID','名称','类型','来源'],
+      missing.map(function(m) {
+        return [
+          escHtml(m.id), escHtml(m.name), escHtml(m.type),
+          '<span class="' + (m.is_system==='系统'?'badge-sys':'badge-custom') + '">' + escHtml(m.is_system) + '</span>',
+        ];
+      })
+    );
+  }
+
+  // 最近变更
+  var changes = dt.recent_changes || [];
+  html += _tblSection('最近数据变更', 'recent-changes', changes.length <= 5,
+    ['时间','节点ID','操作'],
+    changes.map(function(c) {
+      return [escHtml(c.create_time), escHtml(c.node_id), escHtml(c.context)];
+    })
+  );
+
+  $id('detailTables').innerHTML = html;
+}
+
+function _tblSection(title, key, expanded, headers, rows) {
+  var h = '<div class="qd-table-card">';
+  h += '<h4 onclick="toggleTable(\''+key+'\')" class="' + (expanded?'':'collapsed') + '">';
+  h += '<span class="arrow">▼</span> ' + escHtml(title) + '</h4>';
+  h += '<div class="qd-table-wrap' + (expanded?'':' hidden') + '" id="wrap-' + key + '">';
+  h += '<table class="qd-table"><thead><tr>';
+  for (var i = 0; i < headers.length; i++) h += '<th>' + escHtml(headers[i]) + '</th>';
+  h += '</tr></thead><tbody>';
+  for (var r = 0; r < rows.length; r++) {
+    h += '<tr>';
+    for (var c = 0; c < rows[r].length; c++) h += '<td>' + rows[r][c] + '</td>';
+    h += '</tr>';
+  }
+  h += '</tbody></table></div></div>';
+  return h;
+}
+
+function toggleTable(key) {
+  var wrap = $id('wrap-' + key);
+  if (!wrap) return;
+  wrap.classList.toggle('hidden');
+  var h4 = wrap.parentElement.querySelector('h4');
+  if (h4) h4.classList.toggle('collapsed');
+}
+
+// ── FrappeCharts 图表 ──
+function renderCharts(report) {
+  var cd = report.chart_data || {};
+
+  // 销毁旧图表
+  Object.keys(charts).forEach(function(k) {
+    try { charts[k].destroy && charts[k].destroy(); } catch(e) {}
+  });
+  charts = {};
+
+  // 柱状图: 维度评分
+  if (cd.bar && cd.bar.labels && cd.bar.labels.length > 0) {
+    try {
+      charts.bar = new frappe.Chart('#chart-dim-bar', {
+        title: '',
+        data: cd.bar,
+        type: 'bar',
+        height: 220,
+        barOptions: { spaceRatio: 0.4 },
+        colors: ['#00d4ff'],
+        tooltipOptions: { formatTooltipY: function(d) { return d + ' 分'; }},
+        axisOptions: { xAxisMode: 'tick' },
+      });
+    } catch(e) { console.warn('bar chart:', e); }
+  }
+
+  // 饼图: 模型类型分布
+  if (cd.pie && cd.pie.labels && cd.pie.labels.length > 0) {
+    try {
+      charts.pie = new frappe.Chart('#chart-type-pie', {
+        title: '',
+        data: cd.pie,
+        type: 'pie',
+        height: 220,
+        colors: ['#00d4ff', '#7c3aed', '#f59e0b', '#22c55e', '#ef4444'],
+      });
+    } catch(e) { console.warn('pie chart:', e); }
+  }
+
+  // 趋势图: 数据变更
+  if (cd.trend && cd.trend.labels && cd.trend.labels.length > 0) {
+    try {
+      charts.trend = new frappe.Chart('#chart-trend', {
+        title: '',
+        data: cd.trend,
+        type: 'line',
+        height: 220,
+        lineOptions: { regionFill: 1, dotSize: 4 },
+        colors: ['#7c3aed'],
+        axisOptions: { xAxisMode: 'tick', xIsSeries: true },
+      });
+    } catch(e) { console.warn('trend chart:', e); }
+  }
+}
+</script>
+{% endblock %}

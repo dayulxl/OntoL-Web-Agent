@@ -2,7 +2,7 @@
 {% block title %}本体语义 — LangGraph Cluster{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='js-treeview.css') }}">
+<link rel="stylesheet" href="{{ url_for('static-tool', path='treeview/js-treeview.css') }}">
 <style>
 /* ============================================================
    本体语义 — 左树 / 右详情 布局
@@ -225,12 +225,32 @@ footer { display: none; }
         <div id="detailContent" style="display:none;"></div>
     </main>
 
+    <!-- ══════════ Excel 批量导入弹窗 ══════════ -->
+    <div class="ot-move-overlay" id="excelOverlay">
+        <div class="ot-move-box" style="width:600px;">
+            <h4>📥 Excel 批量管理字段</h4>
+            <p style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.8rem;">
+                当前模型: <b id="excelModelName">—</b><br>
+                操作说明: 下载模板 → 在Excel中编辑（新增/修改/删除） → 上传
+            </p>
+            <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem;">
+                <button class="btn btn-accent" onclick="downloadExcelTemplate()" style="flex:1;">📥 下载模板</button>
+                <button class="btn" onclick="document.getElementById('excelFileInput').click()" style="flex:1;">📤 上传Excel</button>
+                <input type="file" id="excelFileInput" accept=".xlsx,.xls" style="display:none;" onchange="uploadExcelFile(this)" />
+            </div>
+            <div id="excelResult" style="display:none;padding:0.6rem;border-radius:6px;margin-bottom:0.5rem;font-size:0.78rem;"></div>
+            <div class="btn-row">
+                <button class="btn" onclick="closeExcelModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
 </div>
 {% endblock %}
 
 
 {% block extra_scripts %}
-<script src="{{ url_for('static', path='js-treeview.js') }}"></script>
+<script src="{{ url_for('static-tool', path='treeview/js-treeview.js') }}"></script>
 <script>
 // 后端预加载的本体树数据 (js-treeview 格式)
 var ONTOLOGY_TREE_DATA = {{ ontology_tree_json | safe }};
@@ -240,7 +260,9 @@ var ONTOLOGY_TREE_DATA = {{ ontology_tree_json | safe }};
 // API / 常量
 // ====================================================================
 var API_MODEL = '/api/v1/ontology-models';
-var MODEL_TYPE_LABEL = {M1:'对象',M2:'行为',M3:'规则',M4:'场景',M5:'主体',M6:'异常补偿',M7:'质量约束',ME:'事件',MT:'模板'};
+// [FEAT] 两页复用同一模板: ontology-template(00) 和 business-semantic(01)
+// 影响范围: 右侧详情字段过滤、新建/编辑字段的默认 attr_mapping
+var ATTR_MAPPING = '{{ attr_mapping | default("00") }}';
 var MODEL_STATUS_LABEL = {'0':'启用中','1':'已停用'};
 var DATA_TYPE_LABEL = {'VARCHAR':'字符串','INTEGER':'整数','FLOAT':'浮点数','DATETIME':'时间'};
 var REQ_FLAG_LABEL = {'0':'不必填','1':'必填'};
@@ -275,9 +297,9 @@ function decorateTreeNodes() {
             if (!item || !item.id) continue;
             var badges = document.createElement('span');
             badges.className = 'leaf-badges';
+            // [FIX] 树节点徽标直接展示 ontol_data_type 原值，不再通过 MODEL_TYPE_LABEL 映射
             if (item.typeCode) {
-                var typeLabel = MODEL_TYPE_LABEL[item.typeCode] || item.typeCode;
-                badges.innerHTML += '<span class="leaf-badge type">' + escHtml(typeLabel) + '</span>';
+                badges.innerHTML += '<span class="leaf-badge type">' + escHtml(item.typeCode) + '</span>';
             }
             if (item.fieldCount > 0) {
                 badges.innerHTML += '<span class="leaf-badge count">' + item.fieldCount + '字段</span>';
@@ -388,9 +410,10 @@ function resetSelection() {
 
 function renderDetail(model) {
     var de = document.getElementById('detailContent');
-    var typeLabel = MODEL_TYPE_LABEL[model.ontol_model_type] || model.ontol_model_type || '—';
+    // [FIX] 展示 ontol_data_type 原值，不再通过 MODEL_TYPE_LABEL 映射为中文
+    var typeLabel = model.ontol_data_type || '—';
     var statusLabel = MODEL_STATUS_LABEL[model.ontol_model_status] || model.ontol_model_status;
-    var attrs = model.attributes || [];
+    var attrs = (model.attributes || []).filter(function(a) { return (a.attr_mapping || '00') === ATTR_MAPPING; });
     var presetAttrs = attrs.filter(function(a) { return a.attr_is_system === '1'; });
     var customAttrs = attrs.filter(function(a) { return a.attr_is_system !== '1'; });
 
@@ -436,6 +459,7 @@ function renderDetail(model) {
                 '<button class="btn" onclick="showEditModelForm(\'' + model.id + '\')">✏ 编辑本体</button>' +
                 '<button class="btn" onclick="showCreateChildForm(\'' + model.id + '\')">＋ 新建子本体</button>' +
                 '<button class="btn" style="border-color:#ef4444;color:#ef4444;" onclick="deleteModelConfirm(\'' + model.id + '\',\'' + escHtml(model.name) + '\')">🗑 删除</button>' +
+                '<button class="btn btn-accent" onclick="openExcelModal()" title="Excel批量管理字段">📥 Excel</button>' +
             '</div>' +
         '</div>' +
         '<div class="ot-section"><h3><span class="dot"></span> 预置字段 (' + presetAttrs.length + ')</h3>' + attrTable(presetAttrs, true, model.id) + '</div>' +
@@ -449,13 +473,12 @@ function renderDetail(model) {
 function showCreateChildForm(parentId, defaultType) {
     var de = document.getElementById('detailContent');
     var dt = defaultType || 'M1';
-    var typeOpts = Object.entries(MODEL_TYPE_LABEL).map(function(e) { return '<option value="' + e[0] + '" ' + (e[0]===dt?'selected':'') + '>' + e[0] + ' — ' + e[1] + '</option>'; }).join('');
     de.innerHTML =
         '<div class="ot-detail-header"><div class="breadcrumb"><a href="#" onclick="selectModel(activeModel);return false;">← 返回</a></div><h1>新建子本体</h1><p class="desc">在 <b>' + escHtml(activeModel?.name||parentId) + '</b> 下创建</p></div>' +
         '<div style="max-width:500px;">' +
             '<label>本体编码 <span style="color:#ef4444;">*</span></label><input id="f-code" placeholder="唯一编码" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>名称 <span style="color:#ef4444;">*</span></label><input id="f-name" placeholder="本体名称" style="width:100%;margin-bottom:0.6rem;" />' +
-            '<label>类型 <span style="color:#ef4444;">*</span></label><select id="f-type" style="width:100%;margin-bottom:0.6rem;">' + typeOpts + '</select>' +
+            '<label>类型 <span style="color:#ef4444;">*</span></label><input id="f-type" placeholder="如 M1, R1, BS1" value="' + escHtml(dt||'') + '" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>描述</label><input id="f-desc" placeholder="本体描述" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>状态</label><select id="f-status" style="width:100%;margin-bottom:1rem;"><option value="0">启用中</option><option value="1">已停用</option></select>' +
             '<div class="ot-actions"><button class="btn btn-accent" onclick="createChildModel(\'' + parentId + '\')">创建</button><button class="btn" onclick="selectModel(activeModel);return false;">取消</button></div>' +
@@ -467,7 +490,7 @@ async function createChildModel(parentId) {
     var name = (document.getElementById('f-name')?.value||'').trim();
     if (!code || !name) { alert('请填写本体编码和名称'); return; }
     try {
-        await apiPost(API_MODEL, {code:code, name:name, ontol_model_type: document.getElementById('f-type')?.value, ontol_parent_id:parentId, ontol_model_status: document.getElementById('f-status')?.value, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
+        await apiPost(API_MODEL, {code:code, name:name, ontol_data_type: document.getElementById('f-type')?.value, ontol_parent_id:parentId, ontol_model_status: document.getElementById('f-status')?.value, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
         await refreshAfterChange();
     } catch(e) { alert('创建失败: ' + e.message); }
 }
@@ -475,13 +498,12 @@ async function createChildModel(parentId) {
 function showEditModelForm(modelId) {
     var model = treeData.find(function(n) { return n.id === modelId; }) || activeModel;
     if (!model) return;
-    var typeOpts = Object.entries(MODEL_TYPE_LABEL).map(function(e) { return '<option value="' + e[0] + '" ' + (e[0]===model.ontol_model_type?'selected':'') + '>' + e[0] + ' — ' + e[1] + '</option>'; }).join('');
     document.getElementById('detailContent').innerHTML =
         '<div class="ot-detail-header"><div class="breadcrumb"><a href="#" onclick="selectModel(activeModel);return false;">← 返回</a></div><h1>编辑本体</h1></div>' +
         '<div style="max-width:500px;">' +
             '<label>本体编码 <span style="color:#ef4444;">*</span></label><input id="f-code" value="' + escHtml(model.code||'') + '" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>名称</label><input id="f-name" value="' + escHtml(model.name||'') + '" style="width:100%;margin-bottom:0.6rem;" />' +
-            '<label>类型</label><select id="f-type" style="width:100%;margin-bottom:0.6rem;">' + typeOpts + '</select>' +
+            '<label>类型</label><input id="f-type" value="' + escHtml(model.ontol_data_type||'') + '" placeholder="如 M1, R1, BS1" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>父级ID</label><input id="f-parent" value="' + escHtml(model.ontol_parent_id||'') + '" placeholder="留空=根节点" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>描述</label><input id="f-desc" value="' + escHtml(model.ontol_model_desc||'') + '" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>状态</label><select id="f-status" style="width:100%;margin-bottom:1rem;"><option value="0" ' + (model.ontol_model_status==='0'?'selected':'') + '>启用中</option><option value="1" ' + (model.ontol_model_status==='1'?'selected':'') + '>已停用</option></select>' +
@@ -493,7 +515,7 @@ async function saveEditModel(modelId) {
     var data = {};
     var code = (document.getElementById('f-code')?.value||'').trim(); if (code) data.code = code;
     var name = (document.getElementById('f-name')?.value||'').trim(); if (name) data.name = name;
-    data.ontol_model_type = document.getElementById('f-type')?.value;
+    data.ontol_data_type = document.getElementById('f-type')?.value;
     data.ontol_parent_id = (document.getElementById('f-parent')?.value||'').trim() || null;
     data.ontol_model_desc = (document.getElementById('f-desc')?.value||'').trim() || null;
     data.ontol_model_status = document.getElementById('f-status')?.value;
@@ -546,6 +568,7 @@ async function createAttr(modelId) {
             attr_default_value: (document.getElementById('a-defval')?.value||'').trim()||null,
             attr_desc: (document.getElementById('a-desc')?.value||'').trim()||null,
             attr_is_system:'0', create_id:'admin',
+            attr_mapping: ATTR_MAPPING,
         });
         await refreshAfterChange();
     } catch(e) { alert('创建失败: ' + e.message); }
@@ -642,7 +665,7 @@ async function showAttrDetail(attrId, modelId) {
 
 function moveAttr(attrId, attrName, fromModelId) {
     var targets = treeData.filter(function(n) { return n.id !== fromModelId && n.delete_flag !== '1'; });
-    var options = targets.map(function(n) { return '<option value="' + n.id + '">' + escHtml(n.name) + ' (' + (MODEL_TYPE_LABEL[n.ontol_model_type]||'') + ')</option>'; }).join('');
+    var options = targets.map(function(n) { return '<option value="' + n.id + '">' + escHtml(n.name) + ' (' + escHtml(n.ontol_data_type||'') + ')</option>'; }).join('');
     if (!options) { alert('没有可移入的本体'); return; }
     var overlay = document.createElement('div'); overlay.className = 'ot-move-overlay open';
     overlay.innerHTML = '<div class="ot-move-box"><h4>📦 移动字段: "' + escHtml(attrName) + '"</h4><label style="font-size:0.75rem;color:var(--text-dim);">目标本体</label><select id="moveTarget" size="8">' + options + '</select><div class="btn-row"><button class="btn" onclick="this.closest(\'.ot-move-overlay\').remove()">取消</button><button class="btn btn-accent" id="confirmMoveBtn">移动</button></div></div>';
@@ -664,7 +687,7 @@ async function moveModel(modelId, modelName) {
     function tHTML(pid, lvl) {
         return fullTree.filter(function(n) { return n.ontol_parent_id === (pid||null) && n.delete_flag !== '1'; }).map(function(n) {
             var blocked = childIds.has(n.id);
-            return '<div class="mtree-item lvl' + Math.min(lvl,3) + (blocked?' current':'') + '" data-id="' + n.id + '"' + (blocked?' title="不能移到自身或子孙"':'') + '><span class="micon">' + (blocked?'🚫':'📄') + '</span><span>' + escHtml(n.name) + ' <span style="color:var(--text-dim);font-size:0.7rem;">' + (MODEL_TYPE_LABEL[n.ontol_model_type]||'') + '</span></span></div>' + tHTML(n.id, lvl+1);
+            return '<div class="mtree-item lvl' + Math.min(lvl,3) + (blocked?' current':'') + '" data-id="' + n.id + '"' + (blocked?' title="不能移到自身或子孙"':'') + '><span class="micon">' + (blocked?'🚫':'📄') + '</span><span>' + escHtml(n.name) + ' <span style="color:var(--text-dim);font-size:0.7rem;">' + escHtml(n.ontol_data_type||'') + '</span></span></div>' + tHTML(n.id, lvl+1);
         }).join('');
     }
     var overlay = document.createElement('div'); overlay.className = 'ot-move-overlay open';
@@ -694,13 +717,12 @@ function showToast(msg) {
 function showCreateRootForm() {
     document.getElementById('emptyState').style.display = 'none';
     document.getElementById('detailContent').style.display = 'block';
-    var typeOpts = Object.entries(MODEL_TYPE_LABEL).map(function(e) { return '<option value="' + e[0] + '">' + e[0] + ' — ' + e[1] + '</option>'; }).join('');
     document.getElementById('detailContent').innerHTML =
         '<div class="ot-detail-header"><h1>新建根本体</h1><p class="desc">创建顶级本体模型（无父级）</p></div>' +
         '<div style="max-width:500px;">' +
             '<label>本体编码 <span style="color:#ef4444;">*</span></label><input id="f-code" placeholder="唯一编码" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>名称 <span style="color:#ef4444;">*</span></label><input id="f-name" placeholder="本体名称" style="width:100%;margin-bottom:0.6rem;" />' +
-            '<label>类型 <span style="color:#ef4444;">*</span></label><select id="f-type" style="width:100%;margin-bottom:0.6rem;">' + typeOpts + '</select>' +
+            '<label>类型 <span style="color:#ef4444;">*</span></label><input id="f-type" placeholder="如 M1, R1, BS1" style="width:100%;margin-bottom:0.6rem;" />' +
             '<label>描述</label><input id="f-desc" placeholder="本体描述" style="width:100%;margin-bottom:1rem;" />' +
             '<div class="ot-actions"><button class="btn btn-accent" onclick="createRootModel()">创建</button><button class="btn" onclick="resetSelection()">取消</button></div>' +
         '</div>';
@@ -712,7 +734,7 @@ async function createRootModel() {
     var name = (document.getElementById('f-name')?.value||'').trim();
     if (!code || !name) { alert('请填写本体编码和名称'); return; }
     try {
-        await apiPost(API_MODEL, {code:code, name:name, ontol_model_type: document.getElementById('f-type')?.value, ontol_parent_id:null, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
+        await apiPost(API_MODEL, {code:code, name:name, ontol_data_type: document.getElementById('f-type')?.value, ontol_parent_id:null, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
         await refreshAfterChange();
     } catch(e) { alert('创建失败: ' + e.message); }
 }
@@ -770,11 +792,75 @@ function initTreeView(data) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // [FIX] 直接用服务端预加载的 ONTOLOGY_TREE_DATA 渲染树，不依赖不存在的 /tree API
-    // 影响范围：页面首次加载时的左侧树渲染
+    // [FIX] 直接用服务端预加载的 ONTOLOGY_TREE_DATA 渲染树
     initTreeView();
     treeData = ONTOLOGY_TREE_DATA;
     updateFooter(ONTOLOGY_TREE_DATA);
 });
+
+// ═══════════════════════════════════════════════
+// Excel 批量导入/导出
+// [FEAT] 下载模板 + 上传Excel批量管理字段(新增/修改/删除)
+// 影响范围: /ontology-template 和 /business-semantic 共享
+// ═══════════════════════════════════════════════
+var _excelModelId = null;
+
+function openExcelModal() {
+    if (!activeModel) { alert('请先在左侧树中选择一个模型'); return; }
+    _excelModelId = activeModel.id;
+    document.getElementById('excelModelName').textContent = _excelModelId + ' (' + (activeModel.name || '') + ')';
+    document.getElementById('excelResult').style.display = 'none';
+    document.getElementById('excelOverlay').classList.add('open');
+}
+
+function closeExcelModal() {
+    document.getElementById('excelOverlay').classList.remove('open');
+}
+
+function downloadExcelTemplate() {
+    var url = API_MODEL + '/' + encodeURIComponent(_excelModelId) + '/export-excel?attr_mapping=' + ATTR_MAPPING;
+    window.open(url, '_blank');
+}
+
+async function uploadExcelFile(input) {
+    var f = input.files[0];
+    if (!f) return;
+    var resultEl = document.getElementById('excelResult');
+    resultEl.style.display = 'block';
+    resultEl.style.background = 'rgba(0,212,255,0.04)';
+    resultEl.style.color = 'var(--text)';
+    resultEl.textContent = '正在上传并处理...';
+
+    var fd = new FormData();
+    fd.append('file', f);
+    try {
+        var url = API_MODEL + '/' + encodeURIComponent(_excelModelId) + '/import-excel?attr_mapping=' + ATTR_MAPPING;
+        var r = await fetch(url, {method:'POST', body:fd});
+        var data = await r.json();
+        if (!r.ok) throw new Error(data.detail || '导入失败');
+        var ok = data.added>0 || data.updated>0 || data.deleted>0;
+        resultEl.style.background = ok ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)';
+        resultEl.style.color = ok ? '#22c55e' : '#f59e0b';
+        var parts = [];
+        if (data.added>0) parts.push('新增 ' + data.added + ' 个');
+        if (data.updated>0) parts.push('修改 ' + data.updated + ' 个');
+        if (data.deleted>0) parts.push('删除 ' + data.deleted + ' 个');
+        if (data.skipped>0) parts.push('跳过 ' + data.skipped + ' 个');
+        resultEl.innerHTML = '✅ 处理完成: ' + parts.join(' · ') + ' (共' + data.total_rows + '行)';
+        if (data.errors && data.errors.length > 0) {
+            resultEl.innerHTML += '<div style="margin-top:0.4rem;color:#ef4444;font-size:0.72rem;">' + data.errors.map(function(e){return escHtml(e);}).join('<br>') + '</div>';
+        }
+        // 刷新
+        await refreshAfterChange();
+        input.value = '';
+    } catch(e) {
+        resultEl.style.display = 'block';
+        resultEl.style.background = 'rgba(239,68,68,0.08)';
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = '❌ ' + e.message;
+    }
+}
+
+document.getElementById('excelOverlay').addEventListener('click', function(e) { if(e.target===this) closeExcelModal(); });
 </script>
 {% endblock %}

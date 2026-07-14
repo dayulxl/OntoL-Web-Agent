@@ -14,11 +14,8 @@ from common.exceptions.base import InfrastructureError
 
 # 业务层导入 — 路由只做参数解析 + 调用 + 格式化响应
 from business.ontology import load_ontology_types as _load_ontology_types, get_inherited_fields as _get_inherited_fields
-from business.tool.snowflake import SnowflakeGenerator, generate_snowflake_ids as _generate_snowflake_ids
-from business.upload.parser import extract_text_from_docx as _extract_text_from_docx, extract_text_from_doc as _extract_text_from_doc, parse_entities_json as _parse_entities_json
-from business.upload.prompts import build_ontology_prompt as _build_ontology_prompt, build_classify_prompt as _build_classify_prompt, build_extract_prompt as _build_extract_prompt, fmt_field as _fmt_field
-from business.upload.validation import validate_entities_for_import as _validate_entities_for_import
-from business.upload.import_service import import_entities_to_graph as _import_entities_to_graph
+from business.tool.snowflake import SnowflakeGenerator as _SnowflakeGenerator
+from business.upload.auto_import.step2_validate import validate_entities as _validate_entities_for_import
 
 router = APIRouter(tags=["Ontology"])
 
@@ -58,7 +55,8 @@ class OntolModelCreateBody(BaseModel):
     code: str = Field(..., max_length=50, description="本体编码（唯一）")
     ontol_parent_id: Optional[str] = Field(None, max_length=32, description="父级模型ID")
     name: str = Field(..., max_length=50, description="本体名称")
-    ontol_model_type: str = Field(..., max_length=2, description="本体类型：M1/M2/M3/M4/M5/M6/M7/ME/MT")
+    ontol_data_type: str = Field(..., max_length=4, description="本体类型：M1实体/M2行为/M3规则/M4场景/M5主体/M6异常/M7质量/ME事件/MT模板 边的类型")
+    ontol_model_type: Optional[str] = Field(None, max_length=50, description="英文简写（不可重复）")
     ontol_model_status: str = Field("0", max_length=2, description="本体状态：0=启用中 1=已停用")
     ontol_model_desc: Optional[str] = Field(None, max_length=255, description="本体描述")
 
@@ -66,7 +64,8 @@ class OntolModelUpdateBody(BaseModel):
     model_config = {"extra": "ignore"}
     code: Optional[str] = Field(None, max_length=50)
     name: Optional[str] = Field(None, max_length=50)
-    ontol_model_type: Optional[str] = Field(None, max_length=2)
+    ontol_data_type: Optional[str] = Field(None, max_length=4)
+    ontol_model_type: Optional[str] = Field(None, max_length=50)
     ontol_model_status: Optional[str] = Field(None, max_length=2)
     ontol_model_desc: Optional[str] = Field(None, max_length=255)
 
@@ -259,7 +258,7 @@ async def create_node(body: NodeCreate, graph=Depends(get_graph)):
     try:
         # 生成雪花 ID（去重）
         import time as _time
-        sf = SnowflakeGenerator(
+        sf = _SnowflakeGenerator(
             worker_id=(int(_time.time() * 1000) & 0x1F),
             datacenter_id=1,
         )
@@ -565,7 +564,7 @@ async def search_ontology_models(
         temp = BaseRepository(pool, "ontol_model", pk="id", soft_delete=True)
         where = {}
         if model_type:
-            where["ontol_model_type"] = model_type
+            where["ontol_data_type"] = model_type
         if status:
             where["ontol_model_status"] = status
         return await temp.search(keyword, columns=["name", "ontol_model_desc"], where=where, limit=limit)
@@ -715,6 +714,73 @@ async def delete_model_attr(model_id: str, attr_id: str, repo=Depends(get_ontolo
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete attr failed: {e}")
+
+
+# =========================================================================
+# Excel 批量导入/导出 — 业务逻辑在 business/upload/excel_service.py
+# =========================================================================
+
+_EXCEL_COLS = [
+    {"key": "action",   "label": "操作",     "width": 10},
+    {"key": "code",     "label": "字段编码",  "width": 18},
+    {"key": "name",     "label": "字段名称",  "width": 16},
+    {"key": "data_type","label": "数据类型",  "width": 12},
+    {"key": "length",   "label": "长度",     "width": 8},
+    {"key": "required", "label": "必填",      "width": 7},
+    {"key": "is_only",  "label": "唯一",      "width": 7},
+    {"key": "default",  "label": "默认值",    "width": 14},
+    {"key": "desc",     "label": "描述",      "width": 24},
+]
+
+
+@router.get("/ontology-models/{model_id}/export-excel")
+async def export_model_attrs_excel(model_id: str, attr_mapping: str = "00"):
+    """导出模型字段为 Excel 模板。"""
+    import tempfile
+    from business.upload.excel_service import export_attrs
+    from business.tool.excel_handler import write_excel, excel_response
+
+    model_name, rows = export_attrs(model_id, attr_mapping)
+    for _ in range(5):
+        rows.append({c["key"]: "" for c in _EXCEL_COLS})
+    tmp = tempfile.mktemp(suffix=".xlsx")
+    write_excel(tmp, "字段模板", _EXCEL_COLS, rows, validations=[
+        {"col": 1, "options": ["新增", "修改", "删除"], "prompt": "请选择操作类型"},
+    ])
+    return excel_response(tmp, f"{model_name}_{model_id}_字段模板.xlsx")
+
+
+@router.post("/ontology-models/{model_id}/import-excel")
+async def import_model_attrs_excel(
+    model_id: str,
+    file: UploadFile = File(...),
+    attr_mapping: str = "00",
+):
+    """上传 Excel 批量处理字段 — 新增/修改/删除。"""
+    import tempfile
+    from business.tool.excel_handler import read_excel
+    from business.upload.excel_service import import_attrs
+
+    if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx/.xls 文件")
+    tmp = tempfile.mktemp(suffix=".xlsx")
+    with open(tmp, "wb") as f:
+        f.write(await file.read())
+    try:
+        headers, rows = read_excel(tmp)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}")
+
+    col_map = {"操作":"action","字段编码":"code","字段名称":"name","数据类型":"data_type",
+               "长度":"length","必填":"required","唯一":"is_only","默认值":"default","描述":"desc"}
+    normalized = []
+    for row in rows:
+        nr = {}
+        for h, v in row.items():
+            nr[col_map.get(h, h)] = v
+        normalized.append(nr)
+
+    return import_attrs(model_id, attr_mapping, normalized)
 
 
 # =========================================================================
@@ -869,20 +935,52 @@ async def validate_entities_for_import(body: ValidateEntitiesRequest):
     return _validate_entities_for_import(body.entities)
 
 
+# [FEAT] Step 3: 符号语言填充 & 推理机校验 — 唯一入口 business/api/
+class EnrichEntitiesRequest(BaseModel):
+    entities: list[dict] = Field(..., description="待富化的实体列表")
+    relationships: list[dict] = Field(default_factory=list, description="关系列表")
+
+
+@router.post("/upload/enrich-entities")
+async def enrich_entities_for_import(body: EnrichEntitiesRequest):
+    """Step 3 — 7种符号语言识别 → 填充标准边属性 → 结构校验。"""
+    from business.api import enrich_entities as _enrich
+    result = _enrich(body.entities, body.relationships)
+    return {
+        "entities": result.entities,
+        "relationships": result.relationships,
+        "symbol_stats": result.symbol_stats,
+        "edge_props_filled": result.edge_props_filled,
+        "node_symbols_found": result.node_symbols_found,
+        "warnings": [
+            {"level": w.level, "target": w.target, "message": w.message}
+            for w in result.warnings
+        ],
+        "error_count": result.error_count,
+        "warn_count": result.warn_count,
+    }
+
+
 @router.post("/upload/parse")
 async def parse_file_to_entities(body: ParseTriplesRequest):
-    """两阶段 AI 解析：分类 → 字段提取。业务逻辑在 business/upload/parser.py + prompts.py。"""
-    from business.upload.parser import _run_parse_pipeline
-    return await _run_parse_pipeline(body.filename, body.model)
+    """两阶段 AI 解析：分类 → 字段提取。业务逻辑在 business/upload/parser.py。"""
+    from business.upload.auto_import.step1_parse import run_parse_pipeline
+    return await run_parse_pipeline(body.filename, body.model)
 
 
 @router.post("/upload/import-entities")
 async def import_entities_to_neo4j(body: ImportEntitiesRequest):
     """导入实体和关系到图数据库。业务逻辑在 business/upload/import_service.py。"""
-    from business.upload.import_service import import_entities_to_graph
-    return await import_entities_to_graph(
-        body.entities, body.relationships, body.scene_ids, body.filename,
-    )
+    from business.upload.auto_import.step4_import import import_to_graph
+    import traceback, logging
+    _logger = logging.getLogger(__name__)
+    try:
+        return await import_to_graph(
+            body.entities, body.relationships, body.scene_ids, body.filename,
+        )
+    except Exception as e:
+        _logger.error(f"实体导入失败: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"导入失败: {e}")
 
 
 # 保留旧的 import-triples 兼容接口
@@ -1101,6 +1199,68 @@ async def delete_scene(scene_id: str, soft: bool = True):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scene delete failed: {e}")
+
+
+# =========================================================================
+# 对话主表 CRUD (ontol_char) — [FEAT] 对话元数据存 DB，消息内容仍存浏览器 localStorage
+# 业务逻辑集中在 business/chat/chat_service.py，路由只做参数校验 + 调用 + 响应
+# =========================================================================
+
+class ChatCreate(BaseModel):
+    id: str = Field(..., description="对话UUID (chart_id)")
+    name: str = Field(default="新对话", description="对话名称")
+    code: Optional[str] = Field(default="", description="编码")
+
+
+class ChatUpdate(BaseModel):
+    name: Optional[str] = Field(None, description="对话名称")
+
+
+@router.post("/chats")
+async def create_chat(body: ChatCreate):
+    """创建对话记录。"""
+    try:
+        from business.chat import chat_service
+        rid = chat_service.create_chat(body.id, body.name, body.code or "")
+        return {"id": rid, "name": body.name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Create chat failed: {e}")
+
+
+@router.get("/chats")
+async def list_chats():
+    """查询对话列表（按更新时间降序）。"""
+    try:
+        from business.chat import chat_service
+        return chat_service.list_chats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"List chats failed: {e}")
+
+
+@router.put("/chats/{chat_id}")
+async def update_chat(chat_id: str, body: ChatUpdate):
+    """更新对话名称。"""
+    try:
+        from business.chat import chat_service
+        ok = chat_service.update_chat(chat_id, body.name)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        return {"updated": True, "id": chat_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Update chat failed: {e}")
+
+
+@router.delete("/chats/{chat_id}")
+async def delete_chat(chat_id: str):
+    """软删除对话记录。"""
+    try:
+        from business.chat import chat_service
+        chat_service.delete_chat(chat_id)
+        return {"deleted": True, "id": chat_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete chat failed: {e}")
 
 
 # =========================================================================
@@ -2173,6 +2333,7 @@ async def unbind_chat_cope_version(relation_id: str):
 
 # =========================================================================
 # 审核记录 API — 薄路由，业务逻辑在 business/audit/audit_service.py
+# 其他模块可直接 import 业务层函数，无需经过 HTTP
 # =========================================================================
 
 
@@ -2187,7 +2348,7 @@ async def list_audit_logs(
     offset: int = 0,
 ):
     """分页查询审核记录。"""
-    from business.audit.audit_service import list_audit_logs as _svc_list
+    from business.audit import list_audit_logs as _svc_list
     return _svc_list(
         audit_status=audit_status, trigger_source=trigger_source,
         node_id=node_id, batch_id=batch_id, keyword=keyword,
@@ -2198,7 +2359,7 @@ async def list_audit_logs(
 @router.get("/audit-logs/{log_id}")
 async def get_audit_log(log_id: str):
     """获取单条审核记录。"""
-    from business.audit.audit_service import get_audit_log as _svc_get
+    from business.audit import get_audit_log as _svc_get
     result = _svc_get(log_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Audit log not found")
@@ -2207,17 +2368,19 @@ async def get_audit_log(log_id: str):
 
 @router.post("/audit-logs")
 async def create_audit_log(body: dict):
-    """创建审核记录。"""
-    from business.audit.audit_service import create_audit_log as _svc_create
-    log_id = _svc_create(body)
+    """创建审核记录（通用 dict 入口，兼容外部调用）。"""
+    from business.audit import create_audit_log as _svc_create, AuditLogCreate
+    model = AuditLogCreate(**body)
+    log_id = _svc_create(model)
     return {"id": log_id, "created": True}
 
 
 @router.put("/audit-logs/{log_id}")
 async def update_audit_log(log_id: str, body: dict):
     """更新审核记录（复核字段+状态）。"""
-    from business.audit.audit_service import update_audit_log as _svc_update
-    ok = _svc_update(log_id, body)
+    from business.audit import update_audit_log as _svc_update, AuditLogUpdate
+    model = AuditLogUpdate(**body)
+    ok = _svc_update(log_id, model)
     if not ok:
         raise HTTPException(status_code=404, detail="Audit log not found")
     return {"updated": True, "id": log_id}
@@ -2226,6 +2389,6 @@ async def update_audit_log(log_id: str, body: dict):
 @router.delete("/audit-logs/{log_id}")
 async def delete_audit_log(log_id: str):
     """软删除审核记录。"""
-    from business.audit.audit_service import delete_audit_log as _svc_delete
+    from business.audit import delete_audit_log as _svc_delete
     _svc_delete(log_id)
     return {"deleted": True, "id": log_id}

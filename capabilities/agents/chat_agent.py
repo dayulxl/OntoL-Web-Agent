@@ -217,7 +217,7 @@ async def search_ontology_models(keyword: str) -> str:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            """SELECT id, ontol_parent_id, name, ontol_model_type,
+            """SELECT id, ontol_parent_id, name, ontol_data_type,
                       ontol_model_status, ontol_model_desc
                FROM ontol_model
                WHERE delete_flag = '0'
@@ -261,7 +261,7 @@ async def get_ontology_tree(root_id: str = "M_ROOT") -> str:
                 INNER JOIN tree t ON m.ontol_parent_id = t.id
                 WHERE m.delete_flag = '0'
             )
-            SELECT * FROM tree ORDER BY depth, ontol_model_type, name""",
+            SELECT * FROM tree ORDER BY depth, ontol_data_type, name""",
             (root_id,),
         ).fetchall()
 

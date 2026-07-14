@@ -24,7 +24,7 @@ def load_ontology_types() -> dict:
     conn.row_factory = sqlite3.Row
     try:
         models = conn.execute(
-            "SELECT * FROM ontol_model WHERE delete_flag='0' ORDER BY ontol_model_type, id"
+            "SELECT * FROM ontol_model WHERE delete_flag='0' ORDER BY ontol_data_type, id"
         ).fetchall()
         for m in models:
             md = dict(m)
@@ -40,7 +40,7 @@ def load_ontology_types() -> dict:
                 "id": md["id"],
                 "name": md["name"],
                 "parent_id": md.get("ontol_parent_id") or None,
-                "type_code": md["ontol_model_type"],
+                "type_code": md["ontol_data_type"],
                 "desc": md["ontol_model_desc"] or "",
                 "fields": [
                     {

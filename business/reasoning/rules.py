@@ -50,18 +50,18 @@ class Rule:
     enabled: bool = True
 
     # 前置条件：存节点属性键名，规则匹配时检查该属性值
-    precondition_key: str = "hasPrecondition"
+    precondition_key: str = "precondition"
 
     # 效果：存节点属性键名，值为 swrl:/sh:/owl2: 前缀表达式
-    effect_key: str = "hasEffect"
+    effect_key: str = "effect"
 
     # 成本/时长/优先级
-    cost_key: str = "hasCost"
-    duration_key: str = "hasDuration"
-    priority_key: str = "hasPriority"
+    cost_key: str = "cost"
+    duration_key: str = "duration"
+    priority_key: str = "priority"
 
     # 组合执行
-    composed_of_key: str = "composedOf"
+    composed_of_key: str = "is_composed_of"
 
     # 置信度：阈值以下阻断
     confidence_threshold: float = 0.5
@@ -182,7 +182,7 @@ def parse_func(value: str) -> dict:
 
 def check_precondition(props: dict, precondition_key: str) -> RuleVerdict:
     """
-    宽容执行：节点有 hasPrecondition 就校验，没有就 SKIP。
+    宽容执行：节点有 precondition 就校验，没有就 SKIP。
 
     支持格式：
       - "status = active"  → 检查 props["status"] == "active"

@@ -57,7 +57,7 @@ class OntologyRepo:
                         INNER JOIN tree t ON m.ontol_parent_id = t.id
                         WHERE m.delete_flag = '0'
                     )
-                    SELECT * FROM tree ORDER BY depth, ontol_model_type, name
+                    SELECT * FROM tree ORDER BY depth, ontol_data_type, name
                     """,
                     root_id,
                 )
@@ -74,14 +74,14 @@ class OntologyRepo:
                         INNER JOIN tree t ON m.ontol_parent_id = t.id
                         WHERE m.delete_flag = '0'
                     )
-                    SELECT * FROM tree ORDER BY depth, ontol_model_type, name
+                    SELECT * FROM tree ORDER BY depth, ontol_data_type, name
                     """
                 )
             return [dict(r) for r in rows]
 
     async def get_children(self, parent_id: str) -> list[dict]:
         """获取直接子节点。"""
-        return await self.model.list_rows(where={"ontol_parent_id": parent_id}, order_by="ontol_model_type, name")
+        return await self.model.list_rows(where={"ontol_parent_id": parent_id}, order_by="ontol_data_type, name")
 
     # ==================================================================
     # 模型 + 属性 复合查询

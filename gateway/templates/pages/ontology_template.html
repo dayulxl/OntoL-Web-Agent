@@ -388,7 +388,7 @@ function resetSelection() {
 
 function renderDetail(model) {
     var de = document.getElementById('detailContent');
-    var typeLabel = MODEL_TYPE_LABEL[model.ontol_model_type] || model.ontol_model_type || '—';
+    var typeLabel = MODEL_TYPE_LABEL[model.ontol_data_type] || model.ontol_data_type || '—';
     var statusLabel = MODEL_STATUS_LABEL[model.ontol_model_status] || model.ontol_model_status;
     var attrs = model.attributes || [];
     var presetAttrs = attrs.filter(function(a) { return a.attr_is_system === '1'; });
@@ -467,7 +467,7 @@ async function createChildModel(parentId) {
     var name = (document.getElementById('f-name')?.value||'').trim();
     if (!code || !name) { alert('请填写本体编码和名称'); return; }
     try {
-        await apiPost(API_MODEL, {code:code, name:name, ontol_model_type: document.getElementById('f-type')?.value, ontol_parent_id:parentId, ontol_model_status: document.getElementById('f-status')?.value, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
+        await apiPost(API_MODEL, {code:code, name:name, ontol_data_type: document.getElementById('f-type')?.value, ontol_parent_id:parentId, ontol_model_status: document.getElementById('f-status')?.value, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
         await refreshAfterChange();
     } catch(e) { alert('创建失败: ' + e.message); }
 }
@@ -475,7 +475,7 @@ async function createChildModel(parentId) {
 function showEditModelForm(modelId) {
     var model = treeData.find(function(n) { return n.id === modelId; }) || activeModel;
     if (!model) return;
-    var typeOpts = Object.entries(MODEL_TYPE_LABEL).map(function(e) { return '<option value="' + e[0] + '" ' + (e[0]===model.ontol_model_type?'selected':'') + '>' + e[0] + ' — ' + e[1] + '</option>'; }).join('');
+    var typeOpts = Object.entries(MODEL_TYPE_LABEL).map(function(e) { return '<option value="' + e[0] + '" ' + (e[0]===model.ontol_data_type?'selected':'') + '>' + e[0] + ' — ' + e[1] + '</option>'; }).join('');
     document.getElementById('detailContent').innerHTML =
         '<div class="ot-detail-header"><div class="breadcrumb"><a href="#" onclick="selectModel(activeModel);return false;">← 返回</a></div><h1>编辑本体</h1></div>' +
         '<div style="max-width:500px;">' +
@@ -493,7 +493,7 @@ async function saveEditModel(modelId) {
     var data = {};
     var code = (document.getElementById('f-code')?.value||'').trim(); if (code) data.code = code;
     var name = (document.getElementById('f-name')?.value||'').trim(); if (name) data.name = name;
-    data.ontol_model_type = document.getElementById('f-type')?.value;
+    data.ontol_data_type = document.getElementById('f-type')?.value;
     data.ontol_parent_id = (document.getElementById('f-parent')?.value||'').trim() || null;
     data.ontol_model_desc = (document.getElementById('f-desc')?.value||'').trim() || null;
     data.ontol_model_status = document.getElementById('f-status')?.value;
@@ -642,7 +642,7 @@ async function showAttrDetail(attrId, modelId) {
 
 function moveAttr(attrId, attrName, fromModelId) {
     var targets = treeData.filter(function(n) { return n.id !== fromModelId && n.delete_flag !== '1'; });
-    var options = targets.map(function(n) { return '<option value="' + n.id + '">' + escHtml(n.name) + ' (' + (MODEL_TYPE_LABEL[n.ontol_model_type]||'') + ')</option>'; }).join('');
+    var options = targets.map(function(n) { return '<option value="' + n.id + '">' + escHtml(n.name) + ' (' + (MODEL_TYPE_LABEL[n.ontol_data_type]||'') + ')</option>'; }).join('');
     if (!options) { alert('没有可移入的本体'); return; }
     var overlay = document.createElement('div'); overlay.className = 'ot-move-overlay open';
     overlay.innerHTML = '<div class="ot-move-box"><h4>📦 移动字段: "' + escHtml(attrName) + '"</h4><label style="font-size:0.75rem;color:var(--text-dim);">目标本体</label><select id="moveTarget" size="8">' + options + '</select><div class="btn-row"><button class="btn" onclick="this.closest(\'.ot-move-overlay\').remove()">取消</button><button class="btn btn-accent" id="confirmMoveBtn">移动</button></div></div>';
@@ -664,7 +664,7 @@ async function moveModel(modelId, modelName) {
     function tHTML(pid, lvl) {
         return fullTree.filter(function(n) { return n.ontol_parent_id === (pid||null) && n.delete_flag !== '1'; }).map(function(n) {
             var blocked = childIds.has(n.id);
-            return '<div class="mtree-item lvl' + Math.min(lvl,3) + (blocked?' current':'') + '" data-id="' + n.id + '"' + (blocked?' title="不能移到自身或子孙"':'') + '><span class="micon">' + (blocked?'🚫':'📄') + '</span><span>' + escHtml(n.name) + ' <span style="color:var(--text-dim);font-size:0.7rem;">' + (MODEL_TYPE_LABEL[n.ontol_model_type]||'') + '</span></span></div>' + tHTML(n.id, lvl+1);
+            return '<div class="mtree-item lvl' + Math.min(lvl,3) + (blocked?' current':'') + '" data-id="' + n.id + '"' + (blocked?' title="不能移到自身或子孙"':'') + '><span class="micon">' + (blocked?'🚫':'📄') + '</span><span>' + escHtml(n.name) + ' <span style="color:var(--text-dim);font-size:0.7rem;">' + (MODEL_TYPE_LABEL[n.ontol_data_type]||'') + '</span></span></div>' + tHTML(n.id, lvl+1);
         }).join('');
     }
     var overlay = document.createElement('div'); overlay.className = 'ot-move-overlay open';
@@ -712,7 +712,7 @@ async function createRootModel() {
     var name = (document.getElementById('f-name')?.value||'').trim();
     if (!code || !name) { alert('请填写本体编码和名称'); return; }
     try {
-        await apiPost(API_MODEL, {code:code, name:name, ontol_model_type: document.getElementById('f-type')?.value, ontol_parent_id:null, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
+        await apiPost(API_MODEL, {code:code, name:name, ontol_data_type: document.getElementById('f-type')?.value, ontol_parent_id:null, ontol_model_desc: (document.getElementById('f-desc')?.value||'').trim()||null, create_id:'admin'});
         await refreshAfterChange();
     } catch(e) { alert('创建失败: ' + e.message); }
 }

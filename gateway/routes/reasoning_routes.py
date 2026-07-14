@@ -39,10 +39,13 @@ def _get_engine(confidence: float = 0.5):
 
 class RunReasoningRequest(BaseModel):
     seed_node_id: int = Field(..., description="起点节点原生 ID")
-    cope_version: str = Field(default="", description="副本版本号（空则自动生成）")
+    copy_version: str = Field(default="", alias="cope_version", description="副本版本号（空则自动生成）")
     confidence_threshold: float = Field(default=0.5, ge=0.01, le=1.0, description="置信度阈值")
     rules: list[str] = Field(default_factory=list, description="启用的规则名称列表（空=全部启用）")
     max_depth: int = Field(default=10, ge=1, le=50, description="最大推理深度")
+
+    class Config:
+        populate_by_name = True
 
 
 # ============================================================
@@ -55,7 +58,7 @@ async def _reasoning_sse_generator(request: RunReasoningRequest) -> AsyncIterato
     try:
         async for event in engine.run(
             seed_node_id=request.seed_node_id,
-            cope_version=request.cope_version,
+            copy_version=request.copy_version,
             rules=request.rules or None,
         ):
             data = _json.dumps(

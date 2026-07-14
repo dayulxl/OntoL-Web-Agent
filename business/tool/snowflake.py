@@ -43,13 +43,14 @@ class SnowflakeGenerator:
 
 def generate_snowflake_ids(
     entities: list[dict],
-    relationships: list[dict],
-    existing_ids: set[int],
 ) -> dict[str, int]:
-    """为实体中 LLM 随机生成的 id 分配雪花 ID，相同随机串 → 相同雪花 ID。
+    """为实体中由 LLM 生成的 id 分配雪花 ID，相同随机串 → 相同雪花 ID。
+
+    雪花算法保证全局唯一，无需查库去重校验。
+    仅处理实体的 properties.id，不涉及关系的 start_node_id/end_node_id。
 
     Returns:
-        {random_id_str: snowflake_int} 映射表
+        {original_id_str: snowflake_int} 映射表
     """
     random_ids: set[str] = set()
     for ent in entities:
@@ -60,23 +61,12 @@ def generate_snowflake_ids(
             continue
         random_ids.add(eid)
 
-    for rel in relationships:
-        for key in ("start_node_id", "end_node_id", "subject", "object"):
-            val = (rel.get(key) or "").strip()
-            if val and not val.isdigit():
-                random_ids.add(val)
-
     if not random_ids:
         return {}
 
     sf = SnowflakeGenerator(worker_id=1, datacenter_id=1)
     id_map: dict[str, int] = {}
     for rid in random_ids:
-        while True:
-            snowflake = sf.next_id()
-            if snowflake not in existing_ids and snowflake not in id_map.values():
-                id_map[rid] = snowflake
-                existing_ids.add(snowflake)
-                break
+        id_map[rid] = sf.next_id()
 
     return id_map

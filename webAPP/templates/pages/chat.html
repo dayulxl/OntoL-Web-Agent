@@ -353,7 +353,7 @@
             <!-- JS 动态渲染 -->
         </div>
         <div class="sidebar-footer">
-            <span id="convCount">0 个对话</span> · 数据存于浏览器
+            <span id="convCount">0 个对话</span> · 元数据存于数据库 · 消息存于浏览器
         </div>
     </aside>
 
@@ -504,6 +504,8 @@ async function deleteChatSceneBindings(chatId) {
 function deleteConversation(chat_id) {
     // 清理后端场景绑定
     deleteChatSceneBindings(chat_id);
+    // [FEAT] 软删除 ontol_char 表中的对话记录
+    fetch('/api/v1/chats/' + chat_id, { method: 'DELETE' }).catch(function() {});
     // 清理本地存储
     localStorage.removeItem(STORAGE_PREFIX + chat_id);
     const index = loadIndex().filter(id => id !== chat_id);
@@ -560,37 +562,66 @@ let stepsLoaded = false;
 
 let deleteTargetChatId = null;  // 待删除的 UUID
 
-function renderSidebar() {
-    const index = loadIndex();
+async function renderSidebar() {
     const listEl = document.getElementById('conversationList');
     const countEl = document.getElementById('convCount');
 
-    countEl.textContent = `${index.length} 个对话`;
+    // [FEAT] 聊天列表从数据库 ontol_char 表查询，按 update_time 降序
+    let dbChats = [];
+    try {
+        const resp = await fetch('/api/v1/chats');
+        if (resp.ok) {
+            dbChats = await resp.json();
+        }
+    } catch (_) {}
 
-    if (index.length === 0) {
+    // [FEAT] 懒迁移：localStorage 中有但 DB 中没有的对话，自动同步到 DB
+    const localIndex = loadIndex();
+    const dbIds = new Set(dbChats.map(c => c.id));
+    for (const chatId of localIndex) {
+        if (!dbIds.has(chatId)) {
+            const conv = loadConversation(chatId);
+            if (conv) {
+                try {
+                    await fetch('/api/v1/chats', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: chatId, name: conv.title || '新对话' }),
+                    });
+                    // 补到列表头部（本地数据没有 update_time，用 conv 的时间）
+                    dbChats.unshift({ id: chatId, name: conv.title || '新对话', update_time: conv.updatedAt, create_time: conv.createdAt });
+                } catch (_) {}
+            }
+        }
+    }
+
+    countEl.textContent = `${dbChats.length} 个对话`;
+
+    if (dbChats.length === 0) {
         listEl.innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--text-dim);font-size:0.8rem;">暂无对话记录<br><br>点击上方按钮开始</div>';
         return;
     }
 
     let html = '';
-    for (const chat_id of index) {
-        const conv = loadConversation(chat_id);
-        if (!conv) continue;  // 脏数据跳过
-        const activeClass = chat_id === currentChatId ? ' active' : '';
-        const title = escHtml(conv.title || '新对话');
-        const time = formatTime(conv.updatedAt || conv.createdAt);
-        const msgCount = (conv.messages || []).length;
-        const sceneNames = (conv.sceneNames || []).slice(0, 2).map(s => escHtml(s)).join(' · ');
+    for (const chat of dbChats) {
+        const chatId = chat.id;
+        const activeClass = chatId === currentChatId ? ' active' : '';
+        const title = escHtml(chat.name || '新对话');
+        const time = formatTime(chat.update_time || chat.create_time);
+        // 消息条数从 localStorage 补充（消息内容仍存浏览器）
+        const conv = loadConversation(chatId);
+        const msgCount = conv ? (conv.messages || []).length : 0;
+        const sceneNames = (conv && conv.sceneNames ? conv.sceneNames : []).slice(0, 2).map(s => escHtml(s)).join(' · ');
         const sceneHint = sceneNames ? `<div class="conv-scenes">📋 ${sceneNames}</div>` : '';
         html += `
-            <div class="conv-item${activeClass}" onclick="switchConversation('${chat_id}')" title="${title}">
+            <div class="conv-item${activeClass}" onclick="switchConversation('${chatId}')" title="${title}">
                 <span class="conv-title">${title}</span>
                 ${sceneHint}
                 <span class="conv-meta">
                     <span>${msgCount} 条消息</span>
                     <span>${time}</span>
                 </span>
-                <button class="conv-delete" onclick="event.stopPropagation(); promptDelete('${chat_id}', '${escHtml(title)}')" title="删除">🗑</button>
+                <button class="conv-delete" onclick="event.stopPropagation(); promptDelete('${chatId}', '${escHtml(title)}')" title="删除">🗑</button>
             </div>`;
     }
     listEl.innerHTML = html;
@@ -713,6 +744,15 @@ async function confirmNewConversation() {
     };
     saveConversation(conv);
 
+    // [FEAT] 对话元数据写入 ontol_char 表
+    try {
+        await fetch('/api/v1/chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: chat_id, name: '新对话' }),
+        });
+    } catch (_) {}
+
     // 绑定场景到后端
     if (sceneIds.length > 0) {
         try {
@@ -792,9 +832,19 @@ function persistCurrentMessages() {
     if (!currentChatId) return;
     const conv = loadConversation(currentChatId);
     if (!conv) return;
+    const oldTitle = conv.title;
     conv.messages = [...currentMessages];
     conv.title = deriveTitle(conv.messages);
     saveConversation(conv);
+
+    // [FEAT] 标题变化时同步更新 ontol_char 表
+    if (conv.title !== oldTitle) {
+        fetch('/api/v1/chats/' + currentChatId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: conv.title }),
+        }).catch(function() {});
+    }
 }
 
 // ═══════════════════════════════════════════════

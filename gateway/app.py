@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from gateway.routes import langgraph_routes, page_routes, chat_routes, ontology_routes, datamanage_routes, reasoning_routes
+from gateway.routes import langgraph_routes, page_routes, chat_routes, ontology_routes, datamanage_routes, reasoning_routes, quality_routes
 from gateway.middleware.auth import AuthMiddleware
 from gateway.middleware.logging import LoggingMiddleware
 from gateway.middleware.rate_limiter import RateLimiterMiddleware
@@ -80,10 +80,13 @@ def create_app() -> FastAPI:
     app.include_router(ontology_routes.router, prefix="/api/v1")
     app.include_router(datamanage_routes.router, prefix="/api/v1")
     app.include_router(reasoning_routes.router)
+    app.include_router(quality_routes.router)
 
 
     # 页面路由 & 静态文件
     app.include_router(page_routes.router)
+    # [FEAT] 前端工具静态资源 — 必须在 /static 前注册，否则被 /static 拦截
+    app.mount("/static/tool", StaticFiles(directory="webAPP/tool"), name="static-tool")
     app.mount("/static", StaticFiles(directory="webAPP/static"), name="static")
 
     return app

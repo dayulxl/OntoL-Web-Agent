@@ -116,7 +116,8 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             id                TEXT PRIMARY KEY,
             ontol_parent_id   TEXT,
             name              TEXT    NOT NULL,
-            ontol_model_type  TEXT    NOT NULL,
+            ontol_data_type   TEXT    NOT NULL,  -- 本体类型：M1实体/M2行为/M3规则/M4场景/M5主体/M6异常/M7质量/ME事件/MT模板 边的类型
+            ontol_model_type  TEXT,              -- 英文简写
             ontol_model_status TEXT   NOT NULL DEFAULT '0',
             ontol_model_desc  TEXT,
             code              TEXT,
@@ -149,6 +150,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             attr_is_system        TEXT    NOT NULL DEFAULT '0',
             attr_order            INTEGER NOT NULL DEFAULT 0,
             attr_desc             TEXT,
+            attr_mapping          TEXT    NOT NULL DEFAULT '00',  -- 映射类型：00=本体模板表, 01=领域模板表
             create_id             TEXT,
             create_time           TEXT    NOT NULL DEFAULT (datetime('now')),
             delete_flag           TEXT    NOT NULL DEFAULT '0',
@@ -340,6 +342,24 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         )
     """)
 
+    # ── 领域表 ──
+    _conn._exec("""
+        CREATE TABLE IF NOT EXISTS ontol_domain_model (
+            id                  TEXT PRIMARY KEY,
+            name                TEXT    NOT NULL DEFAULT '',
+            code                TEXT    NOT NULL DEFAULT '',
+            domain_parent_id    TEXT,
+            domain_level        INTEGER NOT NULL DEFAULT 0,
+            domain_description  TEXT,
+            create_time         TEXT    NOT NULL DEFAULT (datetime('now')),
+            create_user         TEXT    NOT NULL DEFAULT '',
+            update_time         TEXT    NOT NULL DEFAULT '',
+            update_user         TEXT    NOT NULL DEFAULT '',
+            delete_flag         TEXT    NOT NULL DEFAULT '0',
+            is_system           TEXT    NOT NULL DEFAULT '0'
+        )
+    """)
+
     # ── 动态函数类型表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_function_type (
@@ -397,6 +417,21 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         )
     """)
 
+    # ── 对话表 (ontol_char) ── [FEAT] 对话主表，主键 id 即 chart_id
+    _conn._exec("""
+        CREATE TABLE IF NOT EXISTS ontol_char (
+            id          TEXT PRIMARY KEY,  -- chart_id, 对话唯一标识
+            name        TEXT    NOT NULL DEFAULT '',
+            code        TEXT    NOT NULL DEFAULT '',
+            create_time TEXT    NOT NULL DEFAULT (datetime('now')),
+            create_user TEXT    NOT NULL DEFAULT '',
+            update_time TEXT    NOT NULL DEFAULT '',
+            update_user TEXT    NOT NULL DEFAULT '',
+            delete_flag TEXT    NOT NULL DEFAULT '0',
+            is_system   TEXT    NOT NULL DEFAULT '0'
+        )
+    """)
+
     # ── 对话-推演副本关联表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_chat_cope_version_relation (
@@ -423,7 +458,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "ontol_datasource","ontol_datasource_log","ontol_scene_dictionary_relation",
         "ontol_llm_config","ontol_llm_type_config","ontol_function_type","ontol_function",
         "ontol_cope_version","ontol_chat_cope_version_relation",
-        "ontol_audit_log",
+        "ontol_audit_log","ontol_domain_model","ontol_char",
     ]
     for tbl in _MIGRATE_TABLES:
         cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
@@ -463,6 +498,18 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         if "code" not in cols:
             _conn._exec(f"ALTER TABLE {tbl} ADD COLUMN code TEXT NOT NULL DEFAULT ''")
 
+    # ── 专项：ontol_model_type (英文简写, 唯一) ── [FEAT] 模型英文简写字段，不可重复
+    om_cols3 = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_model')")]
+    if "ontol_model_type" not in om_cols3:
+        _conn._exec("ALTER TABLE ontol_model ADD COLUMN ontol_model_type TEXT")
+        _conn._exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_om_mtype ON ontol_model(ontol_model_type)")
+
+    # ── 专项：attr_mapping ── [FEAT] 属性映射类型：00=本体模板表, 01=领域模板表
+    oma_cols2 = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_model_attr')")]
+    if "attr_mapping" not in oma_cols2:
+        _conn._exec("ALTER TABLE ontol_model_attr ADD COLUMN attr_mapping TEXT NOT NULL DEFAULT '00'")
+        _conn._exec("UPDATE ontol_model_attr SET attr_mapping = '00'")
+
     # ── 专项：ontol_cope_version 补充字段 ──
     ocvr_cols = [r["name"] for r in _conn._run("PRAGMA table_info('ontol_cope_version')")]
     if "description" not in ocvr_cols:
@@ -483,7 +530,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     # ═══════════════════════════════════════════════════════════
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_om_parent ON ontol_model(ontol_parent_id)",
-        "CREATE INDEX IF NOT EXISTS idx_om_type   ON ontol_model(ontol_model_type)",
+        "CREATE INDEX IF NOT EXISTS idx_om_type   ON ontol_model(ontol_data_type)",
         "CREATE INDEX IF NOT EXISTS idx_om_del    ON ontol_model(delete_flag)",
         "CREATE INDEX IF NOT EXISTS idx_oma_mid   ON ontol_model_attr(ontol_model_id)",
         "CREATE INDEX IF NOT EXISTS idx_oma_del   ON ontol_model_attr(delete_flag)",
@@ -585,6 +632,13 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     ]:
         _conn._exec(idx_sql)
 
+    # ── ontol_domain_model 索引 ──
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_odm_parent ON ontol_domain_model(domain_parent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_odm_del    ON ontol_domain_model(delete_flag)",
+    ]:
+        _conn._exec(idx_sql)
+
     # ═══════════════════════════════════════════════════════════
     # 种子数据
     # ═══════════════════════════════════════════════════════════
@@ -603,7 +657,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     ]
     for m in models:
         _conn._exec(
-            "INSERT OR IGNORE INTO ontol_model(id,code,ontol_parent_id,name,ontol_model_type,ontol_model_status,ontol_model_desc,create_id,create_time) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO ontol_model(id,code,ontol_parent_id,name,ontol_data_type,ontol_model_status,ontol_model_desc,create_id,create_time) VALUES(?,?,?,?,?,?,?,?,?)",
             m,
         )
 

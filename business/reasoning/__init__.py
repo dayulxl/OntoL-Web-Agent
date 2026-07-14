@@ -26,7 +26,7 @@ from business.reasoning.rules import (
 
 async def run_reasoning(
     seed_node_id: int,
-    cope_version: str = "",
+    copy_version: str = "",
     confidence_threshold: float = 0.5,
     rules: list[str] | None = None,
 ) -> dict:
@@ -38,13 +38,13 @@ async def run_reasoning(
 
     参数:
         seed_node_id: 起点节点原生 ID
-        cope_version: 副本版本号（空则自动生成）
+        copy_version: 副本版本号（空则自动生成）
         confidence_threshold: 置信度阈值 (0.01~1.0)
         rules: 启用的规则名称列表
 
     返回:
         {
-            "cope_version": "v1",
+            "copy_version": "v1",
             "clone_count": 5,
             "edges_built": 8,
             "merged_count": 3,
@@ -57,7 +57,7 @@ async def run_reasoning(
         confidence_threshold=confidence_threshold,
     )
     result = {
-        "cope_version": "",
+        "copy_version": "",
         "clone_count": 0,
         "edges_built": 0,
         "merged_count": 0,
@@ -67,7 +67,7 @@ async def run_reasoning(
     try:
         async for event in eng.run(
             seed_node_id=seed_node_id,
-            cope_version=cope_version,
+            copy_version=copy_version,
             rules=rules,
         ):
             result["log"].append(event.message)
@@ -79,7 +79,7 @@ async def run_reasoning(
                 elif event.step == 3:
                     result["merged_count"] = event.data.get("merged_count", 0)
             elif event.event == "done":
-                result["cope_version"] = eng.cope_version
+                result["copy_version"] = eng.copy_version
                 result["clone_count"] = len(eng.cm)
             elif event.event == "error":
                 result["error"] = event.message

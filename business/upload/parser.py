@@ -262,7 +262,7 @@ async def _run_parse_pipeline(filename: str, model: str = "") -> dict:
         "entities": entities_list,
         "relationships": all_relationships,
         "chunks_total": len(valid_chunks),
-        "chunks_ok": len(valid_chunks) - len(chunk_errors),
+        "chunks_success": len(valid_chunks) - len(chunk_errors),  # [FIX] 前端期望 chunks_success，非 chunks_ok
         "chunks_failed": len(chunk_errors),
         "chunk_errors": chunk_errors[:10],
         "extract_errors": extract_errors[:10],

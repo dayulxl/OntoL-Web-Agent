@@ -39,10 +39,24 @@ def _render(template_name: str, context: dict) -> HTMLResponse:
 # 路由
 # =========================================================================
 
-@router.get("/")
-async def dashboard():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/chat", status_code=302)
+@router.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    ctx = request_context.get()
+    return _render("pages/quality_dashboard.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })
+
+
+@router.get("/quality", response_class=HTMLResponse)
+async def quality_page(request: Request):
+    ctx = request_context.get()
+    return _render("pages/quality_dashboard.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })
 
 
 @router.get("/chat", response_class=HTMLResponse)
@@ -112,8 +126,18 @@ async def workflow_detail(request: Request, name: str):
     })
 
 
-def _build_ontology_tree_for_view() -> list:
-    """从 SQLite ontol_model / ontol_model_attr 表加载本体类型，输出 js-treeview 格式。"""
+def _build_model_tree_for_view(*, table: str, parent_col: str, desc_col: str,
+                                attr_mapping: str, extra_cols: str = "") -> list:
+    """通用模型树构建器 — 从指定表加载类型，输出 js-treeview 格式。
+
+    参数:
+        table: 模型表名 (ontol_model / ontol_domain_model)
+        parent_col: 父级字段名
+        desc_col: 描述字段名
+        attr_mapping: 字段映射类型 '00'=本体模板 / '01'=领域模板
+        extra_cols: 额外 SELECT 列
+    影响范围: /ontology-template 和 /business-semantic 两个页面的左侧树渲染
+    """
     import sqlite3
     from pathlib import Path as _Path
 
@@ -124,13 +148,15 @@ def _build_ontology_tree_for_view() -> list:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
+        extra = ", " + extra_cols if extra_cols else ""
         models = conn.execute(
-            "SELECT id, name, ontol_parent_id AS parent_id, ontol_data_type AS type_code, "
-            "ontol_model_desc AS desc FROM ontol_model WHERE delete_flag='0' ORDER BY id"
+            f"SELECT id, name, {parent_col} AS parent_id{extra}, "
+            f"{desc_col} AS desc FROM {table} WHERE delete_flag='0' ORDER BY id"
         ).fetchall()
         attrs = conn.execute(
             "SELECT ontol_model_id, code FROM ontol_model_attr "
-            "WHERE delete_flag='0' AND attr_mapping='00'"
+            "WHERE delete_flag='0' AND attr_mapping=?",
+            (attr_mapping,)
         ).fetchall()
     finally:
         conn.close()
@@ -138,35 +164,39 @@ def _build_ontology_tree_for_view() -> list:
     if not models:
         return []
 
-    # 统计每个模型的字段数
     attr_counts: dict[str, int] = {}
     for a in attrs:
         mid = a["ontol_model_id"]
         attr_counts[mid] = attr_counts.get(mid, 0) + 1
 
-    # 构建 types dict
     types: dict[str, dict] = {}
     for m in models:
-        types[m["id"]] = {
-            "id": m["id"],
-            "parent_id": m["parent_id"],
-            "name": m["name"],
-            "type_code": m["type_code"] or "",
-            "desc": (m["desc"] or "").strip(),
-            "field_count": attr_counts.get(m["id"], 0),
+        md = dict(m)
+        types[md["id"]] = {
+            "id": md["id"],
+            "parent_id": md["parent_id"],
+            "name": md["name"],
+            "type_code": md.get("type_code", md.get("domain_level", "")) or "",
+            "desc": (md["desc"] or "").strip(),
+            "field_count": attr_counts.get(md["id"], 0),
         }
 
     def build_node(type_id: str) -> dict:
         t = types[type_id]
+        fc = t["field_count"]
+        parts = [t["id"]]
+        if t["name"] and t["name"] != t["id"]:
+            parts.append(f"({t['name']})")
+        if fc > 0:
+            parts.append(f"[{fc}字段]")
         node = {
-            "name": _fmt_node_name(t),
+            "name": " ".join(parts),
             "id": t["id"],
             "typeCode": t["type_code"],
-            "fieldCount": t["field_count"],
+            "fieldCount": fc,
             "desc": t["desc"],
             "children": [],
         }
-        # 找直接子节点
         child_ids = sorted(
             [cid for cid, ct in types.items()
              if ct.get("parent_id") == type_id and cid != type_id],
@@ -175,19 +205,9 @@ def _build_ontology_tree_for_view() -> list:
         for cid in child_ids:
             node["children"].append(build_node(cid))
         if not node["children"]:
-            node.pop("children")  # leaf → select 事件触发
+            node.pop("children")
         return node
 
-    def _fmt_node_name(t: dict) -> str:
-        fc = t["field_count"]
-        parts = [t["id"]]
-        if t["name"] and t["name"] != t["id"]:
-            parts.append(f"({t['name']})")
-        if fc > 0:
-            parts.append(f"[{fc}字段]")
-        return " ".join(parts)
-
-    # 找根节点
     roots = []
     for tid, t in types.items():
         parent_id = t.get("parent_id")
@@ -202,15 +222,37 @@ def _build_ontology_tree_for_view() -> list:
 @router.get("/ontology-template", response_class=HTMLResponse)
 async def ontology_template_page(request: Request):
     ctx = request_context.get()
-    tree = _build_ontology_tree_for_view()
+    tree = _build_model_tree_for_view(
+        table="ontol_model", parent_col="ontol_parent_id",
+        desc_col="ontol_model_desc", attr_mapping="00",
+        extra_cols="ontol_data_type AS type_code",
+    )
     ontology_tree_json = _json.dumps(tree, ensure_ascii=False, default=str)
     return _render("pages/ontology_template.html", {
         "request": request,
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),
         "ontology_tree_json": ontology_tree_json,
+        "attr_mapping": "00",
     })
 
+
+# [FEAT] 业务语义页 — 左侧树查 ontol_domain_model，右侧字段 attr_mapping='01'
+@router.get("/business-semantic", response_class=HTMLResponse)
+async def business_semantic_page(request: Request):
+    ctx = request_context.get()
+    tree = _build_model_tree_for_view(
+        table="ontol_domain_model", parent_col="domain_parent_id",
+        desc_col="domain_description", attr_mapping="01",
+    )
+    ontology_tree_json = _json.dumps(tree, ensure_ascii=False, default=str)
+    return _render("pages/ontology_template.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+        "ontology_tree_json": ontology_tree_json,
+        "attr_mapping": "01",
+    })
 
 @router.get("/ontology", response_class=HTMLResponse)
 async def ontology_page(request: Request):

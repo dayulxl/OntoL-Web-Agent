@@ -26,7 +26,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 
 | 页面 | URL | 说明 |
 |------|-----|------|
-| 态势总览 | http://localhost:8000/ | Canvas 态势图 + 兵力编成 + 场景管理入口 |
+| 首页 | http://localhost:8000/ | 数据质量分析仪表板 — 全维度质量评分 + FrappeCharts 图表 |
 | AI 对话 | http://localhost:8000/chat | 多轮对话，左侧历史列表，支持场景绑定 + 提示词选择 |
 | 场景管理 | http://localhost:8000/prompt-manager | 左场景右提示词，场景+提示词 CRUD |
 | 沙盘推演 | http://localhost:8000/sandbox-wargame | ReactFlow 图编辑 + 推理机推演 + 推演副本模式（?id=） |
@@ -52,19 +52,27 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   │   ├── langgraph_routes.py     # LangGraph 工作流 API
 │   │   ├── datamanage_routes.py    # 数据源/动态API/内置代码/日志 管理
 │   │   ├── reasoning_routes.py     # 🆕 图推理机 SSE 流式接口
-│   │   └── page_routes.py          # Jinja2 页面渲染 (12 个活跃页面)
+│   │   ├── quality_routes.py       # 🆕 数据质量分析 API
+│   │   └── page_routes.py          # Jinja2 页面渲染 (14 个活跃页面)
 │   ├── middleware/          #   中间件 (auth / logging / rate_limiter)
 │   └── templates/          #   [遗留] Jinja2 模板 (14 个页面，未使用，待清理)
 ├── orchestrator/           # 业务流程编排
 ├── business/               # 业务逻辑层 (路由只调用此处, 不能在路由写业务)
+│   ├── api/                         # 🆕 对外接口层 — 唯一合法入口，不写业务，只做 re-export + 转换 + 分发
+│   │   └── __init__.py             #   facade：from business.api import submit_audit（按需扩展子模块）
 │   ├── tool/                        # 🆕 通用工具集 (纯工具, 无业务代码, 跨域复用)
-│   │   └── snowflake.py             #   SnowflakeGenerator — 64位雪花ID生成
+│   │   └── snowflake.py             #   SnowflakeGenerator — 64位雪花ID生成；generate_snowflake_ids(entities) 纯算法，不查库
+│   │   ├── excel_handler.py           #   通用 Excel 读写 (样式/冻结/筛选) — 无业务逻辑
 │   ├── ontology/                    # 🆕 本体类型加载器 (共享基础设施)
 │   │   └── __init__.py             #   load_ontology_types + get_inherited_fields
 │   ├── reasoning/                  # 图推理机业务域
-│   │   ├── engine.py               #   核心：推理引擎主循环 (遍历→匹配→写回)
-│   │   ├── rules.py                #   核心：规则定义 (纯 Python 类/字典)
-│   │   └── graph_ops.py            #   核心：底层图操作 (查邻居、改属性、建边)
+│   │   ├── engine.py               #   编排器：管理共享状态 + 按序调用四步
+│   │   ├── step1_clone.py          #   Step 1: 复制推理关联对象（种子+祖先+下游→副本空间）
+│   │   ├── step2_relink.py         #   Step 2: 副本节点间重建边关系
+│   │   ├── step3_inherit.py        #   Step 3: owl2:subClassOf 属性继承（顶层基底→子类覆盖）
+│   │   ├── step4_reason.py         #   Step 4: 逐节点推理（precondition→effect→边属性叙述）
+│   │   ├── rules.py                #   核心：规则定义/校验/效果路由/置信度传播（纯 Python 类/字典）
+│   │   └── graph_ops.py            #   核心：底层图操作 (查邻居、克隆、建边、属性合并、遍历)
 │   ├── transformation/             # 转换层：本体语言 → Cypher
 │   │   ├── rdfs_converter.py       #   ① RDFS (rdfs: 前缀)
 │   │   ├── owl2_converter.py       #   ② OWL2 DL (owl2: 前缀)
@@ -73,13 +81,25 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   │   ├── rule_converter.py       #   ⑤ 规则设定 (rule: 前缀)
 │   │   ├── func_converter.py       #   ⑥ 动态函数 (func: 前缀)
 │   │   └── jsonpath_converter.py   #   ⑦ JSONPath ($. 前缀, RFC 9535)
+│   ├── chat/                       # 🆕 对话元数据管理 (ontol_char 表 CRUD)
+│   │   └── chat_service.py           #   对话列表/创建/更新/删除 — DB 查列表，消息仍存浏览器
 │   ├── upload/                      # 🆕 文件上传 & AI 实体解析业务域
-│   │   ├── prompts.py              #   LLM 提示词构建 (分类/字段提取/完整本体)
-│   │   ├── parser.py               #   文件文本提取 + JSON 解析 + 两阶段解析管线
-│   │   ├── validation.py           #   实体校验 (模板匹配 + 缺失字段计算)
-│   │   └── import_service.py       #   图数据库导入 (节点/关系/场景绑定)
+│   │   ├── auto_import/               #   全自动导入四步管线
+│   │   │   ├── __init__.py            #     统一下载入口：run_parse_pipeline / validate_entities / enrich_entities / import_to_graph
+│   │   │   ├── step1_parse.py         #     Step 1: AI 本体解析 — run_parse_pipeline(filename,model)
+│   │   │   ├── step2_validate.py      #     Step 2: 模板校验 — validate_entities(entities)
+│   │   │   ├── step3_enrich.py        #     Step 3: 符号语言填充 & 推理机校验 — enrich_entities(entities,relationships)
+│   │   │   └── step4_import.py        #     Step 4: 导入图数据库 — import_to_graph(entities,rels,scene_ids,filename)
+│   │   ├── prompts.py               #   LLM 提示词构建 (分类/字段提取/完整本体)
+│   │   ├── parser.py                #   文件文本提取 + JSON 解析 + 两阶段解析管线
+│   │   ├── validation.py            #   模板匹配 + 继承链缺失字段计算
+│   │   ├── import_service.py        #   雪花ID映射→创建节点→创建关系→场景绑定
+│   │   ├── excel_service.py           #   Excel 批量导入导出 (新增/修改/删除字段)
+│   ├── quality/                      # 🆕 数据质量分析业务域
+│   │   └── analyzer.py            #   五维度质量分析 (完整性/一致性/唯一性/时效性/覆盖率)
 │   ├── audit/                       # 🆕 审核记录业务域
-│   │   └── audit_service.py        #   ontol_audit_log 表 CRUD
+│   │   ├── __init__.py             #   出口：submit_audit / record_audit_result / query_by_node ...
+│   │   └── audit_service.py        #   ontol_audit_log 表 CRUD + Pydantic 模型 (AuditLogCreate/Result/Update)
 │   ├── route_planning/             # 航路规划域 (graph / state / nodes / agent)
 │   └── strike_decision/            # 打击决策域 (graph / state / nodes / agent)
 ├── capabilities/           # 能力层
@@ -112,14 +132,20 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │       └── ontol.db                # 本体模型数据库 (14 张表)
 ├── webAPP/                 # 前端资源 (运行时加载)
 │   ├── templates/                  # Jinja2 模板 (活跃)
-│   │   ├── pages/                  #   页面模板 (13 个)
+│   │   ├── pages/                  #   页面模板 (14 个)
 │   │   │   ├── reasoning_ui.html   #     🆕 推理机控制台
+│   │   │   ├── quality_dashboard.html  #  🆕 首页数据质量仪表板
 │   │   │   ├── audit_log.html      #     🆕 审核记录
 │   │   │   ├── prompt_manager.html #     场景管理
 │   │   │   ├── chat.html           #     AI 对话
 │   │   │   ├── sandbox_wargame.html#     沙盘推演
 │   │   │   └── ...                 #     (共 13 页)
 │   │   └── components/navbar.html  #   导航栏组件
+│   ├── tool/                        # 🆕 前端工具框架 (每个工具独立目录)
+│   │   ├── treeview/                 #   js-treeview 树形导航 (js+css)
+│   │   ├── alpine/                   #   Alpine.js 轻量响应式框架
+│   │   ├── picocss/                  #   Pico.css 轻量 CSS 框架
+│   │   └── FrappeCharts/             #   Frappe Charts 图表库
 │   └── static/
 │       └── js/graph-layout.js      # 有向图布局引擎
 ├── tests/                  # 测试 (pytest, asyncio)
@@ -127,19 +153,20 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 └── scripts/                # 运维脚本
 ```
 
-> **注意**：`gateway/templates/` 为遗留目录（14 个旧模板），`page_routes.py` 实际加载 `webAPP/templates/`（12 个活跃模板）。两个目录的页面不完全重叠，部分旧页面（如 workflow、data_ingestion）仅存在于遗留目录，可能已不可用。
+> **注意**：`gateway/templates/` 为遗留目录（14 个旧模板），`page_routes.py` 实际加载 `webAPP/templates/`（14 个活跃模板）。两个目录的页面不完全重叠，部分旧页面（如 workflow、data_ingestion）仅存在于遗留目录，可能已不可用。
 
 ## 关键技术栈
 
 - **Web**: FastAPI + Uvicorn + Jinja2
 - **AI 编排**: LangChain 0.3 + LangGraph 0.3
 - **LLM**: Anthropic/OpenAI/DeepSeek（通过 models.yaml 配置）
-- **数据库**: Memgraph/Neo4j (知识图谱) + SQLite (本体模型 ontol.db，含 20+ 张表)
+- **数据库**: Memgraph/Neo4j (知识图谱) + SQLite (本体模型 ontol.db，含 21 张表)
 - **SQLite 表结构**:
   - `ontol_model` — 本体模型定义（17 列，树形结构 ontol_parent_id，`ontol_type`='01'本体/'02'关系，`ontol_model_is_system`='1'系统预设）
   - `ontol_model_attr` — 模型属性字段（23 列，`attr_is_system`='1'=系统预设🔒/='0'=自定义，同一 code 可属于不同 model）
   - `ontol_model_scene` — 推演场景（`scene_is_system='1'`=系统预设）
   - `ontol_scene_prompt` — 场景提示词（场景内可建多个提示词，AI 对话可选择）
+  - `ontol_char` — 🆕 对话主表（id=chart_id，对话元数据存 DB，消息内容存浏览器 localStorage）
   - `ontol_char_scene_relation` — 对话↔场景绑定（chart_id）
   - `ontol_node_scene_relation` — 图节点↔场景关系
   - `ontol_data_his` — 图数据变更历史（节点 CRUD 自动记录 + 版本号递增）
@@ -159,6 +186,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - **数据主键约定**: 所有表的 `id` 由后端 `uuid.uuid4().hex[:16]` 自动生成，前端表单禁止展示 id 输入框，列表不展示原始 id；`code`/`name` 等仅作业务语义字段
 - **表命名规范**: SQLite 中所有本体语义相关的配置/元数据表必须以 `ontol_` 为前缀
 - **前端按钮布局规范**: 新增按钮放在内容区顶部，必须有可见按钮不含快捷键；编辑/删除按钮：列表行右侧/卡片右上角
+- **前端工具框架规范**: 所有前端工具框架（JS 库/CSS 主题/第三方组件）必须放在 `webAPP/tool/<工具名>/` 下（如 `webAPP/tool/treeview/`），通过 `app.mount("/static/tool", ...)` 统一挂载，模板中 `url_for('static-tool', path='工具名/文件名')` 引用。挂载顺序 `/static/tool` 必须在 `/static` 之前
 - **HTML 属性值转义**: 动态内容嵌入 HTML 属性时必须用 `escHtml()` 转义 `&` `<` `>` `"`，防止含引号的字符串（如 `actionType: "inference"`）截断 `value="..."`
 - **JS 变量命名**: 对话/副本 ID 统一用 `chat_id`（前后端一致），前端模块变量用 `currentChatId`
 - **配置**: Pydantic Settings (.env)
@@ -167,11 +195,14 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 ## 关键功能
 
 ### AI 对话 (/chat)
-- 左侧历史对话列表，localStorage 持久化（UUID 键值存储）
-- 新建对话时弹出场景多选弹窗 + 提示词选择下拉，绑定关系写入 `ontol_char_scene_relation`
+- **数据分工**：对话列表（id/名称/时间）存 SQLite `ontol_char` 表，消息内容存浏览器 localStorage
+- 左侧历史对话列表 — 从 `GET /api/v1/chats`（DB）查询，按 `update_time` 降序；消息条数从 localStorage 补充
+- 新建对话时 `POST /api/v1/chats` 写入 DB + 弹出场景多选弹窗 + 提示词选择下拉，绑定关系写入 `ontol_char_scene_relation`
+- 对话标题变化时 `PUT /api/v1/chats/{id}` 同步更新 DB
+- 删除对话时 DB 软删除 + localStorage 清除 + 场景绑定清除，三端联动
+- 首次渲染时懒迁移：localStorage 中有但 DB 中没有的历史对话自动同步到 DB
 - 选中提示词后 `POST /api/v1/chat` 携带 `prompt_id`，服务端从 `ontol_scene_prompt` 表加载内容
 - LangChain ReAct Agent 用选中的提示词替代默认 SYSTEM_PROMPT 驱动推理（工具集不变）
-- 切换历史对话时加载对应场景名称，删除对话时自动清理场景绑定
 - SSE 流式推理管道，7 步进度指示器 + 工具调用卡片
 - 右侧推理机调用面板
 
@@ -189,12 +220,12 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 
 ### 本体语义 (/ontology-template)
 - 左侧 **js-treeview** (justinchmura/js-treeview) 树形导航，从 `ontol_model` + `ontol_model_attr` 表直接加载
-- 后端 `page_routes._build_ontology_tree_for_view()` 输出 `[{name, id, typeCode, fieldCount, children, expanded}]` 格式
+- 后端 `page_routes._build_model_tree_for_view()` 通用函数输出 js-treeview 格式，两个页面传不同 table/attr_mapping
 - 点击树节点名 → 右侧加载模型详情（基本信息 + 预置字段表格 + 自定义字段表格）
 - 字段分为「系统预设」（`attr_is_system='1'`，🔒不可删改）和「自定义字段」
 - 前端表格禁编辑 + 后端 PUT/DELETE 403 保护
 - 工具栏：📂全部展开 / 📁全部折叠 / 🔍搜索过滤
-- 静态资源：`webAPP/static/js-treeview.{js,css}`
+- 静态资源：`webAPP/tool/treeview/` 下，通过 `/static/tool/treeview/` 访问（app.py 单独挂载）
 
 ### 本体建模 (/ontology)
 - ReactFlow 图可视化 + 侧边栏节点/关系 CRUD + 边上插入节点
@@ -206,14 +237,49 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - 关系类型为自由输入框（非下拉）
 
 ### 文件上传 & 导入 (/upload)
+
 - 支持 **多格式文件解析**：`.txt` / `.docx`（python-docx 提取段落+表格）/ `.doc`（antiword CLI 提取）
-- LLM 解析文本 → 本体类型识别 + 字段填充
-- **导入前校验** (`/api/v1/upload/validate-entities`)：检测 ont_type 模板匹配
-  - 无匹配模板 → ⚠️ 红色警告，提示先创建本体模型
-  - 有匹配模板 → 📋 列出缺失字段（沿 M_ROOT 继承链计算），确认后自动补全默认值
+- **全自动导入四步管线**（每步独立 Python 文件，通过 `business/api/` 统一入口）：
+
+```
+Step 1: AI 本体解析       auto_import/step1_parse.py    → 文本提取 + 分块 → 两阶段 LLM (分类→字段提取)
+Step 2: 模板校验 & 字段补全  auto_import/step2_validate.py → ontol_model 模板匹配 + 继承链缺失字段计算
+Step 3: 符号语言填充 & 校验  auto_import/step3_enrich.py   → 7种前缀识别 + 边属性填充 + 推理机结构校验
+Step 4: 导入图数据库       auto_import/step4_import.py   → 雪花ID映射 → MERGE节点 → MERGE关系 → 场景绑定
+```
+
+- **Step 3 符号语言支持**：扫描实体属性/关系谓词中的 7 种前缀（`rdfs:`/`owl2:`/`swrl:`/`sh:`/`rule:`/`func:`/`$.`），自动填充标准边属性（actionType/required/validationType/ruleId/msg），并对 SWRL 语法/func JSON/SHACL 约束做结构校验
+- **API 端点**：`POST /api/v1/upload/parse` | `/validate-entities` | `/enrich-entities` | `/import-entities`
+- 解析返回 `chunks_success`/`chunks_failed`（前端日志展示），`chunks_total` 文件分块数
 - 补全规则：M_ROOT 字段全局共用，各类型沿 ontol_parent_id 链向上继承
 - 解析完成后弹出场景多选弹窗（默认勾选系统预设场景）
 - 导入实体后写入 `ontol_node_scene_relation` 节点-场景绑定
+
+### 数据质量首页 (/) 🆕
+
+首页数据质量仪表板，综合评估系统数据健康度。纯原生 JS + FrappeCharts，无框架依赖。
+
+**核心模块**：
+- `business/quality/analyzer.py` — 五维度质量分析引擎（~400 行）
+- `gateway/routes/quality_routes.py` — `GET /api/v1/quality/report` 返回结构化报告
+- `webAPP/templates/pages/quality_dashboard.html` — 首页仪表板 UI（纯原生 JS）
+
+**五大评估维度**：
+
+| 维度 | 分析内容 | 数据源 |
+|------|----------|--------|
+| 完整性 | 模型属性覆盖率、必填字段默认值缺失 | ontol_model + ontol_model_attr |
+| 一致性 | 外键孤儿引用（场景↔提示词，属性↔模型） | 多表 JOIN 检查 |
+| 唯一性 | 重复名称/编码检测 | 各表 GROUP BY HAVING |
+| 时效性 | 各表最近更新时间，超 30 天未更新比例 | 各表 update_time/cteate_time |
+| 覆盖率 | 子系统数据填充度（模型/属性/场景/提示词/LLM/数据源） | 全表扫描计数 |
+
+**仪表板 UI**：
+- SVG 环形评分动画 + 五维度 KPI 卡片（点击跳转）
+- FrappeCharts 图表：柱状图（维度评分）、饼图（模型类型分布）、折线图（变更趋势）
+- 问题清单（error/warning/info 三级着色）
+- 可折叠详情表格：模型属性概览、场景提示词覆盖、缺失属性模型、最近变更
+- 🔄 刷新按钮 + 立即渲染（先占位再异步加载，避免白屏）
 
 ### LLM 配置 (/llm-config) 🆕
 
@@ -251,17 +317,41 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 
 自研图推理引擎，直接在 Memgraph 图上执行规则推理，不依赖外部推理机服务。
 
-**核心流程**：选起点节点 → 配推理规则 → 引擎遍历图 → 规则匹配 → 写回结果
+**核心流程**：选起点节点 → 配推理规则 → 四步流水线 → SSE 实时推送日志
 
 ```
-用户选节点 + 规则 ──► engine.py (主循环)
-                         │
-                         ├─ traversal:  沿边遍历邻居 (graph_ops.py)
-                         ├─ match:      节点属性匹配规则条件 (rules.py)
-                         ├─ convert:    规则 DSL → Cypher (transformation/)
-                         └─ writeback:  结果写回图节点/边
-                              │
-                         SSE 推送实时日志 ──► webAPP/templates/pages/reasoning_ui.html
+engine.py (编排器 — 管理共享状态 cm / ancestors / reasoning_log)
+    │
+    ├─ Step 1 (step1_clone.py)   克隆种子+OWL2祖先链+inference下游链 → 副本空间
+    │     ├─ climb_subclass_chain 沿 owl2:subClassOf 上溯祖先
+    │     ├─ walk_inference_chain 沿 actionType=inference 下探下游 (DFS防环)
+    │     └─ clone_node ×N        注入 copy_version，填充 cm 映射表
+    │
+    ├─ Step 2 (step2_relink.py)  遍历 cm，原边 → 副本边 (同类型+同属性)
+    │     └─ get_relationships + clone_edge
+    │
+    ├─ Step 3 (step3_inherit.py) owl2:subClassOf 语义：祖先属性为基底，逐层被子类覆盖
+    │     └─ merge_inherited_props + update_node_props (有变化才写回)
+    │
+    └─ Step 4 (step4_reason.py) 逐节点推理叙述
+          ├─ ① precondition  前置条件校验 (支持 "key = val" / "key > N" / "hasProperty:key")
+          ├─ ② effect        效果分类 (按7种前缀路由: swrl/sh/owl2/rule/func/$.)
+          ├─ ③ cost/duration/priority  消耗指标叙述
+          └─ ④ 沿 inference 边读取 9 个标准边属性 → Strong 阻断判定
+               │
+          SSE 推送实时日志 ──► webAPP/templates/pages/reasoning_ui.html
+```
+
+**四步之间通过 Python 函数参数传递共享状态**（cm 克隆映射表、ancestors 祖先链），引擎不包含推理逻辑，只做编排：
+
+```python
+# engine.py run() — 纯函数调用串联
+async for event in step1_clone(seed_node_id, copy_version, self.cm, self.ancestors):
+    yield event                              # async generator (流式)
+edge_count = await step2_relink(self.cm)     # async function (返回值)
+merged_count = await step3_inherit(self.cm, self.ancestors)
+async for event in step4_reason(seed_node_id, self.cm, self.ancestors, threshold):
+    yield event
 ```
 
 **架构分层**：
@@ -270,9 +360,10 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 |----|------|------|
 | Gateway | `reasoning_routes.py` | 接收 HTTP 请求，参数校验，SSE 推流 |
 | UI | `webAPP/templates/pages/reasoning_ui.html` | 选起点节点、配规则、看实时执行日志 |
-| 业务 | `business/reasoning/` | 推理引擎核心，图遍历 + 规则匹配 + 写回 |
+| 业务 | `business/reasoning/` | 四步流水线：克隆→建边→继承→推理，纯 Python 函数串联 |
 | 转换 | `business/transformation/` | 7 种本体语言 → Cypher 查询语句 |
 | 基础设施 | `infrastructure/db/neo4j.py` | Memgraph 驱动，Bolt 协议连接池 |
+| 图操作 | `graph_ops.py` | 原子 DB 操作：查/克隆/建边/属性合并/遍历/Cypher 裸执行 |
 
 **推理机控制台页面** (`webAPP/templates/pages/reasoning_ui.html`)：
 - 起点节点选择器（按 code/name/ont_type 搜索）
@@ -296,7 +387,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - `POST /api/v1/tools/call` → KG 推理机 (`KG_SERVER_URL`)，支持 `infer_forward`、`validate`、`check_rule`、`expand`
 - `POST /api/v1/infer-on-nodes` → KG 推理机 `/infer-on-nodes-id-fc`，NDJSON 响应自动解析为结构化 messages
 - **副本节点 ID 规则**：推理机创建副本节点时，节点 ID 必须为 `{原节点ID}-{副本编码}`（如 `node_12345-V1.0`），确保图内全局唯一
-- **图节点/边 Snowflake ID**：Memgraph 中所有节点和边的 `id` 使用 **Snowflake 算法** 生成 **64 位纯数字整数**（int64，不转字符串）；导入时 `SnowflakeGenerator` 先查询已有 ID 去重，再将 LLM 随机字符串 ID 替换为纯数字 Snowflake ID，相同随机串映射到相同 Snowflake ID
+- **图节点/边 Snowflake ID**：Memgraph 中所有节点和边的 `id` 使用 **Snowflake 算法** 生成 **64 位纯数字整数**（int64，不转字符串）；导入时 `generate_snowflake_ids(entities)` 将 LLM 随机字符串 ID 直接替换为纯数字 Snowflake ID（算法天生唯一，无需查库去重），相同随机串映射到相同 Snowflake ID。只处理实体 properties.id，不碰关系的 start_node_id/end_node_id
 
 ### 推演副本管理 🆕
 - **表**: `ontol_cope_version` — 副本主键 id + 副本名称 name + 状态 cope_version_status(00待处理/01推理中/02推理完成/03已删除) + 初始节点 init_note_id/init_note_name + 置信度 confidence(0.01~1.00，默认0.8) + 描述 description
@@ -373,7 +464,87 @@ async def get_item(item_id: str, repo=Depends(get_repo)):
 
 **迁移纪律**：发现违反分层规范的代码，发现一处迁移一处，禁止新增违规，禁止累积。
 
-**现状**：`ontology_routes.py`（原 3161 行，已瘦身至 2230 行 -30%）已将上传解析/Snowflake/本体加载等业务逻辑迁移至 `business/` 对应模块。剩余的图操作/场景管理/字典管理/LLM 配置等仍有迁移空间。
+**现状**：`ontology_routes.py` 已将上传解析/校验/符号填充/导入四步全部迁移至 `business/upload/auto_import/stepN_*.py`，路由层只做薄壳调用（每函数 ≤15 行）。清除了 `parser.py`/`prompts.py` 的 7 个死引用。图操作/场景管理/字典管理/LLM 配置等仍有迁移空间。
+
+### 业务模块间调用规范（强制）
+
+**内部模块之间禁止走 HTTP，必须走 Python 函数调用。** 所有外部调用必须经过 `business/api/` 中转，禁止绕过。
+
+**两层约束**：
+
+```
+外部调用方
+  │
+  ▼
+business/api/__init__.py     ← 唯一合法入口（只做 re-export + 数据转换，不写业务逻辑）
+  │
+  ▼
+business/<domain>/           ← 内部实现（业务逻辑在此）
+```
+
+| 层 | 目录 | 允许 | 禁止 |
+|----|------|------|------|
+| API 门面 | `business/api/` | re-export 透传、数据格式转换、入参校验、路由分发 | **任何业务逻辑**：数据库查询、LLM 调用、文件解析、复杂计算 |
+| 业务域 | `business/<domain>/` | 业务规则、流程编排、DB 操作、LLM 调用 | 直接暴露内部实现给外部调用方 |
+
+**`business/api/` 代码规范**：
+
+```python
+# ✅ 正确 — business/api/__init__.py：只做 re-export
+from business.audit.audit_service import submit_audit, record_audit_result
+
+# ✅ 正确 — business/api/audit_api.py：有转换需求时，只写转换代码
+from business.audit.audit_service import submit_audit as _submit
+
+def submit_audit(node_id: str, batch_id: str, data: dict) -> str:
+    """外部格式 → 内部格式转换后透传。"""
+    snapshot = json.dumps(data, ensure_ascii=False)
+    return _submit(node_id, batch_id, snapshot)
+```
+
+```python
+# ❌ 禁止 — business/api/ 里写 SQL
+def submit_audit(node_id, batch_id, data):
+    conn = sqlite3.connect(...)  # 不行！这是业务逻辑
+    conn.execute("INSERT INTO ...")
+```
+
+**调用方视角**：
+
+```python
+# ✅ 正确 — 外部调用只走 business.api
+from business.api import submit_audit, record_audit_result, query_by_node
+
+log_id = submit_audit("node_123", batch_id="B001", input_snapshot=json.dumps(data))
+record_audit_result(log_id, audit_status="PASS", llm_score=0.95)
+history = query_by_node("node_123")
+```
+
+```python
+# ❌ 禁止 — 绕过 api 层直接调 domain
+from business.audit import submit_audit
+
+# ❌ 禁止 — 内部模块间走 HTTP
+import httpx
+r = await httpx.post("http://127.0.0.1:8000/api/v1/audit-logs", json={...})
+```
+
+**`__init__.py` 导出约定**：外部 import 只写到 `business.api`，不深入内部：
+
+```python
+from business.api import submit_audit              # ✅ 唯一合法形式
+from business.audit.audit_service import ...        # ❌ 绕过 api 层
+```
+
+**函数签名约束**：
+
+| 规则 | 说明 |
+|------|------|
+| **必填参数前置** | `(node_id, batch_id, ...)` 核心参数位置参数，可选参数 keyword-only |
+| **合理默认值** | 调用方只需传最少参数即可工作（如 `batch_id` 不传自动生成） |
+| **Pydantic 模型可选** | 复杂入参提供 Pydantic 模型（如 `AuditLogCreate`），简单参数直接用原语 |
+| **返回 Python 对象** | 返回 `str`/`bool`/`list[dict]`/Pydantic 模型，不返回 HTTP Response |
+| **异常抛 AppException** | 不抛 HTTPException（那是路由层的职责） |
 
 ### 显式校验，禁止静默兜底
 

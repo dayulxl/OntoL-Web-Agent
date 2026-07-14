@@ -2,7 +2,9 @@
 
 > **定位**: 本文档定义全局性架构规则与跨层约束。各层的实现细节、编码规范、接口契约见各自模块文档。
 
-**版本**: 3.0.0 | **更新**: 2026-07-13
+**版本**: 3.1.0 | **更新**: 2026-07-14
+
+**主题**: 对话元数据 DB 化 + 审核记录类型化 + 模块间调用规范
 
 ---
 
@@ -42,7 +44,7 @@ d:/langchain/                        # 项目根（Git 仓库根）
 │   │   ├── chat_routes.py             # 对话 SSE 流式 API（7步管道 + 动态提示词）
 │   │   ├── langgraph_routes.py         # LangGraph 工作流 API
 │   │   ├── page_routes.py              # Jinja2 页面路由（加载 webAPP/templates/）
-│   │   ├── ontology_routes.py          # 本体建模 + 场景 + 提示词 + 图 CRUD
+│   │   ├── ontology_routes.py          # 本体建模 + 场景 + 提示词 + 对话 + 图 CRUD
 │   │   ├── datamanage_routes.py        # 数据源/动态API/内置代码/日志 管理
 │   │   └── reasoning_routes.py         # 🆕 图推理机 SSE 流式接口
 │   ├── middleware/                   # 中间件
@@ -147,9 +149,23 @@ d:/langchain/                        # 项目根（Git 仓库根）
 ├── business/                         # 业务域层
 │   ├── __init__.py
 │   ├── BUSINESS.md
+│   ├── api/                         # 🆕 对外接口层 — 唯一合法入口，不写业务，只做 re-export + 转换 + 分发
+│   │   └── __init__.py               #   facade：from business.api import submit_audit（按需扩展子模块）
 │   ├── master_agent.py               # MasterAgent — 跨域总调度
 │   ├── prompts/
 │   │   └── master.txt                # master agent 提示词
+│   ├── upload/                      # 🆕 文件上传 & AI 实体解析业务域
+│   │   ├── auto_import/               #   全自动导入四步管线
+│   │   │   ├── __init__.py            #     统一入口: run_parse_pipeline/validate_entities/enrich_entities/import_to_graph
+│   │   │   ├── step1_parse.py         #     Step 1: AI 本体解析
+│   │   │   ├── step2_validate.py      #     Step 2: 模板校验 & 字段补全
+│   │   │   ├── step3_enrich.py        #     Step 3: 符号语言填充 & 推理机校验
+│   │   │   └── step4_import.py        #     Step 4: 导入 Memgraph 图数据库
+│   │   ├── parser.py                  #   文件文本提取 + JSON 解析 + 两阶段 LLM 管线
+│   │   ├── prompts.py                 #   LLM 提示词构建 (分类/字段提取)
+│   │   ├── validation.py              #   模板匹配 + 继承链缺失字段计算
+│   │   └── import_service.py          #   雪花ID映射 + Memgraph写入 + 场景绑定
+│   │   ├── excel_service.py           #   Excel 批量导入导出
 │   ├── route_planning/               # 航路规划域
 │   │   ├── __init__.py
 │   │   ├── graph.py                  # RoutePlanningGraph
@@ -166,11 +182,21 @@ d:/langchain/                        # 项目根（Git 仓库根）
 │   │   ├── agent.py                  # StrikeDecisionAgent (ReAct)
 │   │   ├── prompts/agent.txt         # 域专用提示词
 │   │   └── tools/__init__.py
-│   ├── reasoning/                    # 🆕 图推理机业务域
+│   ├── reasoning/                    # 🆕 图推理机业务域（四步流水线）
+│   │   ├── __init__.py               #   公共 API：ReasoningEngine, run_reasoning, run_reasoning_on_nodes
+│   │   ├── engine.py                 #   编排器：管理共享状态 (cm/ancestors/log)，按序调用四步
+│   │   ├── step1_clone.py            #   Step 1: 复制推理关联对象（种子+祖先+下游→副本空间）
+│   │   ├── step2_relink.py           #   Step 2: 副本节点间重建边关系
+│   │   ├── step3_inherit.py          #   Step 3: owl2:subClassOf 属性继承
+│   │   ├── step4_reason.py           #   Step 4: 逐节点推理叙述（precondition→effect→边属性）
+│   │   ├── rules.py                  #   规则定义/校验/效果路由/置信度传播
+│   │   └── graph_ops.py              #   底层图原子操作（查/克隆/建边/属性合并/遍历/Cypher）
+│   ├── audit/                        # 🆕 审核记录业务域
+│   │   ├── __init__.py               #   出口：submit_audit / record_audit_result / query_by_node ...
+│   │   └── audit_service.py          #   ontol_audit_log 表 CRUD + Pydantic 模型 + 便捷函数
+│   ├── chat/                         # 🆕 对话元数据管理
 │   │   ├── __init__.py
-│   │   ├── engine.py                 # 推理引擎主循环（遍历→匹配→写回）
-│   │   ├── rules.py                  # 规则定义（纯 Python 类/字典）
-│   │   └── graph_ops.py              # 底层图操作（查邻居、改属性、建边）
+│   │   └── chat_service.py           # ontol_char 表 CRUD（列表/创建/更新/删除）
 │   └── transformation/               # 🆕 转换层：本体语言 → Cypher
 │       ├── __init__.py
 │       ├── rdfs_converter.py         # ① RDFS (rdfs: 前缀)
@@ -186,7 +212,7 @@ d:/langchain/                        # 项目根（Git 仓库根）
 │   ├── INFRASTRUCTURE.md
 │   ├── db/
 │   │   ├── __init__.py
-│   │   ├── sqlite_db.py              # SQLite 自动建表+种子（16 张表）
+│   │   ├── sqlite_db.py              # SQLite 自动建表+种子（17 张表）
 │   │   ├── base_repo.py              # BaseRepository 通用异步 CRUD 基类
 │   │   ├── postgres.py               # asyncpg 连接池 + 健康检查
 │   │   ├── ontology_repo.py          # OntologyRepo — 本体模型数据访问层
@@ -253,6 +279,7 @@ d:/langchain/                        # 项目根（Git 仓库根）
 | **MUST** 推理机副本节点 ID | 格式 `{原节点ID}-{副本编码}`（如 `node_abc-V1.0`） |
 | **MUST** 图节点/边 ID 用 Snowflake | Memgraph 中所有节点和边 `id` 为 64 位纯数字整数 (int64) |
 | **MUST** `ontol_` 表名前缀 | SQLite 中所有配置/元数据表名必须以 `ontol_` 为前缀 |
+| **MUST** `business/<domain>/` 暴露函数接口 | 内部模块间调用 MUST 走 Python import，**禁止**内部 HTTP 调用；函数签名：必填参数前置 + keyword-only 可选 + Pydantic 模型辅助 |
 | **MUST** 新增按钮在顶部 | 前端新增按钮放在内容区域顶部 |
 | **MUST** 编辑/删除按钮在行右 | 列表行的编辑和删除按钮放在行右侧 |
 | **MUST** 卡片按钮在右上角 | 卡片布局的编辑/删除按钮放在卡片右上角 |
@@ -336,7 +363,7 @@ d:/langchain/                        # 项目根（Git 仓库根）
 |----|------|-----------|-------------|
 | 网关 | `gateway/` | HTTP 路由、中间件、请求校验、SSE 流封装、Jinja2 模板渲染、静态文件服务 | 持有 LLM 实例、直接操作数据库、包含业务逻辑 |
 | 编排 | `orchestrator/` | 图定义/编译/执行、状态管理、条件路由、checkpoint 持久化 | 直接构造 Prompt、定义 Tool 实现、管理连接池 |
-| 业务 | `business/` | 定义域专用图/状态/节点、编排域业务流程 | 跨域直接 import、导入 `gateway/` |
+| 业务 | `business/` | 定义域专用图/状态/节点、编排域业务流程、暴露 Python 函数给其他模块调用（禁止内部 HTTP） | 跨域直接 import、导入 `gateway/`、模块间走 HTTP |
 | 能力 | `capabilities/` | Agent 定义、Chain 构建、Tool 实现、记忆存取、模型适配 | 处理 HTTP 请求、管理图状态、管理数据库连接 |
 | 基础设施 | `infrastructure/` | 连接池封装、客户端实例化、健康检查 | 包含 AI 逻辑、理解 LangChain/LangGraph 概念 |
 | 共享 | `common/` | 配置读取、Pydantic Schema、异常类、工具函数 | 依赖任何上层或同层模块 |
@@ -381,12 +408,52 @@ chat.html → 选择场景+提示词 → POST /api/v1/chat {prompt_id}
 
 ```
 reasoning_ui.html → POST /api/v1/reasoning/run (SSE)
-  → reasoning_routes.py → business/reasoning/engine.py
-    → graph_ops.py (查邻居、改属性、建边)
-    → rules.py (规则匹配)
-    → transformation/ (本体语言 → Cypher)
-    → infrastructure/db/neo4j.py (Memgraph 执行)
+  → reasoning_routes.py → business/reasoning/engine.py (编排)
+    ├─ step1_clone.py   graph_ops.clone_node + climb_subclass_chain + walk_inference_chain
+    ├─ step2_relink.py  graph_ops.clone_edge
+    ├─ step3_inherit.py graph_ops.merge_inherited_props + update_node_props
+    └─ step4_reason.py  rules (check_precondition/classify_effect) + graph_ops.get_relationships
   → SSE 流式推送实时日志 → reasoning_ui.html
+```
+
+### 2.5 全自动导入四步管线 🆕
+
+```
+upload.html (🤖 全自动导入按钮) → POST /api/v1/upload/parse (Step 1)
+  → auto_import/step1_parse.py → parser.py (文本提取→分块→LLM分类→LLM字段提取)
+  → {entities, relationships, type_counts}
+
+upload.html → POST /api/v1/upload/validate-entities (Step 2)
+  → auto_import/step2_validate.py → validation.py (ontol_model模板匹配+继承链缺失字段)
+
+upload.html → POST /api/v1/upload/enrich-entities (Step 3)
+  → auto_import/step3_enrich.py (7种前缀识别+边属性填充+SWRL/SHACL/func结构校验)
+
+upload.html → POST /api/v1/upload/import-entities (Step 4)
+  → auto_import/step4_import.py → import_service.py (雪花ID→MERGE节点→MERGE关系→场景绑定)
+```
+
+**Step 3 符号语言覆盖**：
+
+| # | 语言 | 前缀 | 边属性填充 | 结构校验 |
+|---|------|------|-----------|---------|
+| 1 | RDFS | `rdfs:` | actionType/validationType/msg | 前缀识别即合法 |
+| 2 | OWL2 DL | `owl2:` | actionType/validationType/msg | 前缀识别即合法 |
+| 3 | SWRL | `swrl:` | actionType=inference, validationType=Strong | antecedent→consequent 结构 |
+| 4 | SHACL | `sh:` | actionType/validationType | 已知约束类型检查 |
+| 5 | 规则设定 | `rule:` | ruleId=forwardChain/backwardChain | 方向枚举校验 |
+| 6 | 动态函数 | `func:` | actionType=inference | 合法JSON + id/func字段 |
+| 7 | JSONPath | `$.` | actionType=data | 路径段解析 |
+
+所有四步均通过 `business/api/` re-export 统一入口，路由层只做薄壳调用。
+
+
+
+**四步通过 Python 函数参数传递共享状态**（不经过路由、不走 HTTP）：
+
+```python
+cm:       dict[int, tuple[dict, int]]   # {原生ID: (原生节点dict, 副本ID)}  Step1填充→Step2-4消费
+ancestors: list[dict]                   # OWL2 祖先链，Step1填充→Step3-4消费
 ```
 
 ---
@@ -407,6 +474,81 @@ HTTP Request → middleware (auth/log/rate) → route handler
 - 所有持久化状态通过 Postgres (checkpoint) + Redis (会话缓存) + Memgraph (知识图谱) 外置
 - Worker 进程无状态，可任意扩缩
 - LangGraph checkpoint 线程安全，支持并发读取（写操作按 thread_id 序列化）
+
+### 3.3 模块间调用约束 🆕
+
+**内部模块之间禁止走 HTTP，必须走 Python 函数调用。** 且所有外部调用必须经过 `business/api/` 中转。
+
+**两层约束**：
+
+```
+外部调用方
+  │
+  ▼
+business/api/__init__.py     ← 唯一合法入口（只做 re-export + 数据转换，不写业务逻辑）
+  │
+  ▼
+business/<domain>/           ← 内部实现（业务逻辑在此）
+```
+
+| 层 | 目录 | 允许 | 禁止 |
+|----|------|------|------|
+| API 门面 | `business/api/` | re-export 透传、数据格式转换、入参校验、路由分发 | **任何业务逻辑**：SQL、LLM 调用、文件解析、复杂计算 |
+| 业务域 | `business/<domain>/` | 业务规则、流程编排、DB 操作、LLM 调用 | 直接暴露内部实现给外部调用方 |
+
+**代码示范**：
+
+```python
+# ✅ business/api/__init__.py — 只做 re-export
+from business.audit.audit_service import submit_audit, record_audit_result
+
+# ✅ business/api/audit_api.py — 有转换需求时，只写转换代码
+def submit_audit(node_id: str, batch_id: str, data: dict) -> str:
+    """外部格式 → 内部格式转换后透传。"""
+    return _submit(node_id, batch_id, json.dumps(data, ensure_ascii=False))
+```
+
+```python
+# ❌ business/api/ 里写 SQL — 禁止！业务逻辑属于 domain 层
+def submit_audit(node_id, batch_id, data):
+    conn = sqlite3.connect(...)
+    conn.execute("INSERT INTO ...")
+```
+
+**调用链**：
+
+```
+外部模块 (任意层)
+  → from business.api import submit_audit      # ✅ 唯一合法入口
+  → business/api/__init__.py (re-export)        #   不写业务，只透传
+  → business/audit/audit_service.py (实现)        #   直接操作 DB / LLM
+```
+
+**反模式**（禁止）：
+
+```
+外部模块 → POST http://127.0.0.1:8000/api/v1/audit-logs  # ❌ 内部走 HTTP
+外部模块 → from business.audit import submit_audit        # ❌ 绕过 api 层
+business/api/ 里面写 SQL / 调 LLM                         # ❌ 门面层写业务
+```
+
+**函数签名约束**：
+
+| 规则 | 示例 |
+|------|------|
+| 必填参数前置 | `submit_audit(node_id, batch_id, input_snapshot)` |
+| 可选参数 keyword-only | `submit_audit("n1", "b1", "{}", trigger_source="MANUAL")` |
+| 合理默认值 | `batch_id` 不传自动生成 `uuid4().hex[:12]` |
+| 复杂入参用 Pydantic | `AuditLogCreate(node_id="n1", batch_id="b1")` |
+| 返回 Python 对象 | `str` / `bool` / `list[dict]` / Pydantic 模型，不返回 HTTP Response |
+| 异常用 AppException | 不抛 HTTPException（那是路由层职责） |
+
+**`__init__.py` 导出约束**：外部 import 只写到 `business.api`，不深入内部：
+
+```python
+from business.api import submit_audit              # ✅ 唯一合法形式
+from business.audit.audit_service import ...        # ❌ 绕过 api 层
+```
 
 ---
 
@@ -525,7 +667,7 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 
 ## 8. 数据库表总览 🆕
 
-### 8.1 SQLite (ontol.db) — 16 张表
+### 8.1 SQLite (ontol.db) — 17 张表
 
 | # | 表 | 用途 |
 |---|----|------|
@@ -545,6 +687,7 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 | 14 | `ontol_function` | 动态函数配置（classpath/method/超时/重试） |
 | 15 | `ontol_cope_version` | 推演副本（状态 00/01/02/03 + 初始节点 + 置信度） |
 | 16 | `ontol_chat_cope_version_relation` | 对话 ↔ 推演副本关联（多对一） |
+| 17 | `ontol_char` | 🆕 对话主表（id=chart_id，对话元数据存 DB，消息内容存浏览器 localStorage） |
 
 **运行时自动创建的表**（不在此 DDL 中，由 ontology_routes.py 按需创建）：
 
@@ -595,6 +738,9 @@ Redis 动态配置  >  环境变量  >  .env 文件  >  Settings 默认值
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 3.3.0 | 2026-07-14 | 上传管道重构 — 四步解耦为独立文件 (step1_parse/step2_validate/step3_enrich/step4_import)；新增 Step 3 符号语言填充 & 推理机校验 (7种本体语言前缀识别+边属性填充+结构校验)；新增 `/api/v1/upload/enrich-entities` 端点；`business/api/` 统一 re-export 四个 step 入口；路由层清除 7 个死引用 (parser.py/prompts.py) |
+| 3.2.0 | 2026-07-14 | 推理机引擎拆分 — engine.py 四步流水线拆为独立模块：step1_clone/step2_relink/step3_inherit/step4_reason；engine.py 变为薄编排层（191行）；新增 walk_inference_chain 到底层 graph_ops；四步间纯 Python 函数调用串联，不经过路由/HTTP |
+| 3.1.0 | 2026-07-14 | 新增 `ontol_char` 对话主表（第 17 张表）；新增 `business/chat/` `business/api/` 模块；重构 `business/audit/` — Pydantic 模型 + submit_audit/record_audit_result 便捷函数；对话 CRUD API；审核记录 API 类型化；**模块间调用规范**（禁止内部 HTTP，必须走 Python import，见 §3.3）
 | 3.0.0 | 2026-07-13 | 架构文档案重写 — 基于真实文件清单；新增 reasoning/transformation/reasoning_routes；修正 gateway vs webAPP 模板目录；移除虚构文件；SQLite 表 14→16 张；Git 仓库范围扩大至项目根 |
 | 2.4.1 | 2026-07-10 | 图节点/边 Snowflake ID 标准（64 位）；OWL2+SWRL+SHACL 语义规范；本体类型 M1-M7 枚举 |
 | 2.4.0 | 2026-07-09 | 新增场景管理 + 提示词（ontol_scene_prompt 表 + CRUD）；宽容执行加固 |
