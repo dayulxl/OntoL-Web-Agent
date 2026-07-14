@@ -40,6 +40,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 数据管理 | http://localhost:8000/datamanage | 数据源/API/内置接口/日志管理（卡片式） |
 | 推理机控制台 | http://localhost:8000/reasoning | 选起点节点、配推理规则、看实时执行日志 |
 | LLM 配置 | http://localhost:8000/llm-config | LLM 模型配置 CRUD（类型+配置），为 /chat 和 /upload 提供统一模型接口 |
+| 审核记录 | http://localhost:8000/audit-log | ontol_audit_log 审核流水查询，统计卡片 + 筛选 + 详情弹窗 + 分页 |
 
 ## 项目结构
 
@@ -55,12 +56,16 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   ├── middleware/          #   中间件 (auth / logging / rate_limiter)
 │   └── templates/          #   [遗留] Jinja2 模板 (14 个页面，未使用，待清理)
 ├── orchestrator/           # 业务流程编排
-├── business/               # 业务逻辑层
-│   ├── reasoning/                  # 🆕 图推理机业务域
+├── business/               # 业务逻辑层 (路由只调用此处, 不能在路由写业务)
+│   ├── tool/                        # 🆕 通用工具集 (纯工具, 无业务代码, 跨域复用)
+│   │   └── snowflake.py             #   SnowflakeGenerator — 64位雪花ID生成
+│   ├── ontology/                    # 🆕 本体类型加载器 (共享基础设施)
+│   │   └── __init__.py             #   load_ontology_types + get_inherited_fields
+│   ├── reasoning/                  # 图推理机业务域
 │   │   ├── engine.py               #   核心：推理引擎主循环 (遍历→匹配→写回)
 │   │   ├── rules.py                #   核心：规则定义 (纯 Python 类/字典)
 │   │   └── graph_ops.py            #   核心：底层图操作 (查邻居、改属性、建边)
-│   ├── transformation/             # 🆕 转换层：本体语言 → Cypher
+│   ├── transformation/             # 转换层：本体语言 → Cypher
 │   │   ├── rdfs_converter.py       #   ① RDFS (rdfs: 前缀)
 │   │   ├── owl2_converter.py       #   ② OWL2 DL (owl2: 前缀)
 │   │   ├── swrl_converter.py       #   ③ SWRL (swrl: 前缀)
@@ -68,6 +73,13 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   │   ├── rule_converter.py       #   ⑤ 规则设定 (rule: 前缀)
 │   │   ├── func_converter.py       #   ⑥ 动态函数 (func: 前缀)
 │   │   └── jsonpath_converter.py   #   ⑦ JSONPath ($. 前缀, RFC 9535)
+│   ├── upload/                      # 🆕 文件上传 & AI 实体解析业务域
+│   │   ├── prompts.py              #   LLM 提示词构建 (分类/字段提取/完整本体)
+│   │   ├── parser.py               #   文件文本提取 + JSON 解析 + 两阶段解析管线
+│   │   ├── validation.py           #   实体校验 (模板匹配 + 缺失字段计算)
+│   │   └── import_service.py       #   图数据库导入 (节点/关系/场景绑定)
+│   ├── audit/                       # 🆕 审核记录业务域
+│   │   └── audit_service.py        #   ontol_audit_log 表 CRUD
 │   ├── route_planning/             # 航路规划域 (graph / state / nodes / agent)
 │   └── strike_decision/            # 打击决策域 (graph / state / nodes / agent)
 ├── capabilities/           # 能力层
@@ -100,12 +112,13 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │       └── ontol.db                # 本体模型数据库 (14 张表)
 ├── webAPP/                 # 前端资源 (运行时加载)
 │   ├── templates/                  # Jinja2 模板 (活跃)
-│   │   ├── pages/                  #   页面模板 (12 个)
+│   │   ├── pages/                  #   页面模板 (13 个)
 │   │   │   ├── reasoning_ui.html   #     🆕 推理机控制台
+│   │   │   ├── audit_log.html      #     🆕 审核记录
 │   │   │   ├── prompt_manager.html #     场景管理
 │   │   │   ├── chat.html           #     AI 对话
 │   │   │   ├── sandbox_wargame.html#     沙盘推演
-│   │   │   └── ...                 #     (共 12 页)
+│   │   │   └── ...                 #     (共 13 页)
 │   │   └── components/navbar.html  #   导航栏组件
 │   └── static/
 │       └── js/graph-layout.js      # 有向图布局引擎
@@ -121,21 +134,28 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - **Web**: FastAPI + Uvicorn + Jinja2
 - **AI 编排**: LangChain 0.3 + LangGraph 0.3
 - **LLM**: Anthropic/OpenAI/DeepSeek（通过 models.yaml 配置）
-- **数据库**: Memgraph/Neo4j (知识图谱) + SQLite (本体模型 ontol.db，含 12 张表)
+- **数据库**: Memgraph/Neo4j (知识图谱) + SQLite (本体模型 ontol.db，含 20+ 张表)
 - **SQLite 表结构**:
-  - `ontol_model` — 本体模型定义（树形结构，ontol_parent_id 父子关系）
-  - `ontol_model_attr` — 模型属性字段（`attr_is_system='1'`=系统预设不可删改，28 个有效字段）
+  - `ontol_model` — 本体模型定义（17 列，树形结构 ontol_parent_id，`ontol_type`='01'本体/'02'关系，`ontol_model_is_system`='1'系统预设）
+  - `ontol_model_attr` — 模型属性字段（23 列，`attr_is_system`='1'=系统预设🔒/='0'=自定义，同一 code 可属于不同 model）
   - `ontol_model_scene` — 推演场景（`scene_is_system='1'`=系统预设）
-  - `ontol_scene_prompt` — 🆕 场景提示词（场景内可建多个提示词，AI 对话可选择）
-  - `ontol_char_scene_relation` — 对话↔场景绑定
+  - `ontol_scene_prompt` — 场景提示词（场景内可建多个提示词，AI 对话可选择）
+  - `ontol_char_scene_relation` — 对话↔场景绑定（chart_id）
   - `ontol_node_scene_relation` — 图节点↔场景关系
   - `ontol_data_his` — 图数据变更历史（节点 CRUD 自动记录 + 版本号递增）
   - `ontol_datasource` — 数据源配置（MySQL/PG/Oracle 等）
   - `ontol_datasource_type` — 数据源类型（`is_system='1'`=系统预设，不可删改）
-  - `ontol_cope_version` — 🆕 推演副本表（状态 00/01/02/03 + 初始节点 + 置信度）
-  - `ontol_chat_cope_version_relation` — 🆕 对话-副本关联表（chat_id + cope_version_id）
-  - `ontol_llm_type_config` — 🆕 LLM 类型配置（provider 协议：OpenAI/Anthropic/OpenAI-compatible 等）
-  - `ontol_llm_config` — 🆕 LLM 模型实例配置（url/key/model，外键关联 ontol_llm_type_config）
+  - `ontol_datasource_log` — 数据源接口日志
+  - `ontol_cope_version` — 推演副本表（状态 00/01/02/03 + 初始节点 + 置信度）
+  - `ontol_chat_cope_version_relation` — 对话-副本关联表（chat_id + cope_version_id）
+  - `ontol_scene_dictionary` — 场景字典（维度管理，字典类型+内容）
+  - `ontol_scene_dictionary_relation` — 场景-字典多对多关联
+  - `ontol_dictionary_type` — 字典类型（关系类型/实体标签词典）
+  - `ontol_function` — 动态函数（classpath + method + timeout/retry）
+  - `ontol_function_type` — 函数类型分类
+  - `ontol_llm_type_config` — LLM 类型配置（provider 协议：OpenAI/Anthropic/OpenAI-compatible 等）
+  - `ontol_llm_config` — LLM 模型实例配置（url/key/model，外键关联 ontol_llm_type_config）
+  - `ontol_audit_log` — 🆕 审核记录流水（16 字段，含 batch_id/audit_status/llm_score/suggested_data/input_snapshot/llm_raw_output 等）
 - **数据主键约定**: 所有表的 `id` 由后端 `uuid.uuid4().hex[:16]` 自动生成，前端表单禁止展示 id 输入框，列表不展示原始 id；`code`/`name` 等仅作业务语义字段
 - **表命名规范**: SQLite 中所有本体语义相关的配置/元数据表必须以 `ontol_` 为前缀
 - **前端按钮布局规范**: 新增按钮放在内容区顶部，必须有可见按钮不含快捷键；编辑/删除按钮：列表行右侧/卡片右上角
@@ -164,7 +184,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 ### 沙盘推演 (/sandbox-wargame)
 - ReactFlow 图编辑 + 左侧实体树
 - 上下文切换：场景（多选）/ AI 对话历史（单选），互斥
-- 推演参数：`code`（实体编码）、`name`、`relation`、`cope_version`、`depth`、`direction`、`confidence_threshold`、`scenes`/`chat_history`
+- 推演参数：`code`（实体编码）、`name`、`relation`、`copy_version`、`depth`、`direction`、`confidence_threshold`、`scenes`/`chat_history`
 - 置信度滑块 + toggle 开关，全局阈值控制推理命中概率
 
 ### 本体语义 (/ontology-template)
@@ -283,11 +303,11 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 - **关联表**: `ontol_chat_cope_version_relation` — id + chat_id + cope_version_id（对话↔副本多对一绑定）
 - **API**: `GET/POST/PUT/DELETE /api/v1/cope-versions` + `GET /api/v1/cope-versions/{id}`（单条） + `GET /api/v1/cope-versions/{id}/graph`（副本图数据） + `DELETE /api/v1/cope-versions/{id}/nodes`（删除副本节点）
 - **对话-副本绑定 API**: `POST /api/v1/chat-cope-versions/bind`（先删旧再绑新） + `GET /api/v1/chat-cope-versions/{chat_id}` + `DELETE /api/v1/chat-cope-versions/{id}`
-- **图数据查询逻辑**: status=00 → 查无 cope_version 属性的原始节点；status≠00 → 查 cope_version={id} 的副本节点
+- **图数据查询逻辑**: status=00 → 查无 copy_version 属性的原始节点；status≠00 → 查 copy_version={id} 的副本节点
 - **沙盘推演副本模式**: `?id={cope_id}` 进入推演模式，工具栏显示推演名称+初始节点，置信度输入框同步副本 confidence 值
 - **推理结果展示**: NDJSON → 拆分为 messages 数组 → 按 `═══ Step` 分组 → 再按 `【第N步】` 拆卡片，工具栏下方横向排列
 - **重置按钮**: 推演模式下显「🔄 重置」，根据 graph_id 查原节点属性覆盖副本节点
-- **节点隔离**: 推演模式下创建的节点/关系自动注入 `cope_version={id}` 属性
+- **节点隔离**: 推演模式下创建的节点/关系自动注入 `copy_version={id}` 属性
 - **AI 对话绑定**: 新建对话时可选推演副本，未选则自动创建 + 写入关联表
 
 ### 本体前缀规范
@@ -330,7 +350,8 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 | 层 | 目录 | 允许 | 禁止 |
 |----|------|------|------|
 | 路由层 | `gateway/routes/` | HTTP 请求解析、参数校验（Pydantic）、调用业务层、格式化 HTTP 响应 | **任何业务逻辑**：数据库查询、Cypher/LLM 调用、文件解析、数据转换、复杂计算、业务规则判断 |
-| 业务层 | `business/` | 业务规则、流程编排、领域逻辑、推理引擎 | 直接操作 HTTP 请求/响应对象 |
+| 业务层 | `business/<domain>/` | 业务规则、流程编排、领域逻辑、推理引擎 | 直接操作 HTTP 请求/响应对象 |
+| 工具层 | `business/tool/` | 纯工具函数：算法、编码器、生成器、格式转换。无状态、无业务判断、可跨域引用 | 写 SQL、调用 LLM、做业务判断 |
 | 能力层 | `capabilities/` | 可复用的技术能力：Agent、Memory、工具集、模型、提示词、链 | 业务规则判断 |
 | 基础设施 | `infrastructure/` | 数据库驱动、连接池、底层 Repository | 业务逻辑 |
 
@@ -352,7 +373,7 @@ async def get_item(item_id: str, repo=Depends(get_repo)):
 
 **迁移纪律**：发现违反分层规范的代码，发现一处迁移一处，禁止新增违规，禁止累积。
 
-**现状**：`ontology_routes.py`（~3200 行）是这个反模式的典型案例，其中嵌入了图操作、本体模型、文件上传解析、场景管理、字典管理、LLM 配置、副本管理等大量业务逻辑。这些应该分别迁移到 `business/` 下对应模块。
+**现状**：`ontology_routes.py`（原 3161 行，已瘦身至 2230 行 -30%）已将上传解析/Snowflake/本体加载等业务逻辑迁移至 `business/` 对应模块。剩余的图操作/场景管理/字典管理/LLM 配置等仍有迁移空间。
 
 ### 显式校验，禁止静默兜底
 
@@ -363,7 +384,7 @@ async def get_item(item_id: str, repo=Depends(get_repo)):
 | 必填参数为空 | 校验 → 返回明确错误信息 | 自动生成 UUID/随机值兜底 |
 | 配置项缺失 | 抛异常，说明缺少什么 | 用硬编码默认值悄悄填充 |
 
-**为什么**：兜底值会掩盖上游调用方的 bug。比如前端忘了传 `cope_version`，服务端悄悄生成一个 UUID，用户永远不知道推理结果写到了哪个副本，排查困难。
+**为什么**：兜底值会掩盖上游调用方的 bug。比如前端忘了传 `copy_version`，服务端悄悄生成一个 UUID，用户永远不知道推理结果写到了哪个副本，排查困难。
 
 ### 时间戳规范（跨页面、跨实体）
 
@@ -378,6 +399,33 @@ async def get_item(item_id: str, repo=Depends(get_repo)):
 **实现位置**：在 `capabilities/memory/graph_memory.py` 的 `create_node`、`update_node`、`create_edge`、`update_edge` 统一处理，路由层和前端不做时间戳逻辑。
 
 **为什么**：创建时间是不可变事实，更新时间反映最后一次真实写入——两者都不能信任前端传值。
+
+### 数据库命名规范（强制）
+
+**所有表名和列名必须使用 `snake_case`（小写下划线），禁止 `camelCase`（驼峰式）。**
+
+> ⚠️ 新增字段必须遵守此规范。发现驼峰 → 立即修正，不得提交。
+
+| ✅ 正确 | ❌ 错误 |
+|---------|---------|
+| `create_time` | `createTime` |
+| `is_composed_of` | `isComposedOf` |
+| `query_variant` | `queryVariant` |
+| `cope_version_status` | `copeVersionStatus` |
+
+详细规范见 [docs/naming-convention.md](docs/naming-convention.md)。
+
+### 图数据库时间戳规范（强制）
+
+**Memgraph 中所有节点和边的 `create_time` 和 `update_time` 属性，必须使用 Unix 时间戳（int64）。**
+
+| ✅ 正确 | ❌ 错误 |
+|---------|---------|
+| `n.create_time = 1699887600` | `n.create_time = "2026-07-14 12:00:00"` |
+
+- **类型**：整数 int64，秒级（10位），UTC
+- **写入时机**：节点/边创建时系统自动写入；更新时自动刷新
+- **与 SQLite 的区别**：SQLite 的 `create_time` 是字符串 `"2026-07-14 12:00:00"`，图数据库用整数时间戳
 
 ### 写代码前必须做的事
 
@@ -427,7 +475,7 @@ async def get_item(item_id: str, repo=Depends(get_repo)):
 | 没有这个值 | 跳过，继续执行 |
 
 **适用示例**：
-- 推理机读节点属性 — `props.get("hasPrecondition")` 有则校验，没有则跳过整个校验块
+- 推理机读节点属性 — `props.get("precondition")` 有则校验，没有则跳过整个校验块
 - 图数据库查询 — 属性存在就返回，不存在就 `None`
 - 前端渲染图节点详情 — 字段有值就展示，没值就隐藏
 - LLM 实体解析 — 文本中提取到字段就填充，提取不到就留空
