@@ -444,7 +444,10 @@ async def tools_call(body: ToolsCallBody):
 class InferOnNodesBody(BaseModel):
     node_ids: list[str] = Field(default_factory=list, description="节点内置ID列表")
     confidence: float = Field(default=0.8, description="置信度")
-    cope_version: str = Field(default="", description="副本版本号")
+    copy_version: str = Field(default="", alias="cope_version", description="副本版本号")
+
+    class Config:
+        populate_by_name = True
 
 
 @router.post("/infer-on-nodes")
@@ -481,14 +484,14 @@ async def infer_on_nodes(body: InferOnNodesBody):
 
     result = await run_reasoning(
         seed_node_id=seed_id,
-        cope_version=body.cope_version,
+        copy_version=body.copy_version,
         confidence_threshold=body.confidence,
     )
 
     return {
         "ok": result["error"] is None,
         "messages": result["log"],
-        "cope_version": result["cope_version"],
+        "copy_version": result["copy_version"],
         "clone_count": result["clone_count"],
         "edges_built": result["edges_built"],
     }
@@ -2967,14 +2970,14 @@ async def delete_cope_version(cope_id: str):
 
 @router.delete("/cope-versions/{cope_id}/nodes")
 async def delete_cope_version_nodes(cope_id: str):
-    """批量删除图数据库中 cope_version 匹配该记录 ID 的节点。"""
+    """批量删除图数据库中 copy_version 匹配该记录 ID 的节点。"""
     from infrastructure.db.neo4j import get_driver
 
     try:
         driver = await get_driver()
         async with driver.session() as session:
             result = await session.run(
-                "MATCH (n) WHERE n.cope_version = $cope_id DETACH DELETE n RETURN count(n) AS deleted",
+                "MATCH (n) WHERE n.copy_version = $cope_id DETACH DELETE n RETURN count(n) AS deleted",
                 cope_id=cope_id,
             )
             record = await result.single()
@@ -3005,8 +3008,8 @@ async def get_cope_version(cope_id: str):
 async def get_cope_graph(cope_id: str):
     """
     获取推演副本的图数据（节点+关系）。
-    - status=00: 返回没有 cope_version 属性的节点
-    - 其他状态: 返回 cope_version=cope_id 的节点
+    - status=00: 返回没有 copy_version 属性的节点
+    - 其他状态: 返回 copy_version=cope_id 的节点
     """
     from infrastructure.db.neo4j import get_driver
 
@@ -3026,18 +3029,18 @@ async def get_cope_graph(cope_id: str):
             if status == "00":
                 cypher = """
                     MATCH (n)
-                    WHERE n.cope_version IS NULL OR n.cope_version = ''
+                    WHERE n.copy_version IS NULL OR n.copy_version = ''
                     OPTIONAL MATCH (n)-[r]-(m)
-                    WHERE m.cope_version IS NULL OR m.cope_version = ''
+                    WHERE m.copy_version IS NULL OR m.copy_version = ''
                     RETURN n, collect(DISTINCT {edge: r, node: m}) AS rels
                     LIMIT 500
                 """
             else:
                 cypher = """
                     MATCH (n)
-                    WHERE n.cope_version = $cope_id
+                    WHERE n.copy_version = $cope_id
                     OPTIONAL MATCH (n)-[r]-(m)
-                    WHERE m.cope_version = $cope_id
+                    WHERE m.copy_version = $cope_id
                     RETURN n, collect(DISTINCT {edge: r, node: m}) AS rels
                     LIMIT 500
                 """
@@ -3156,3 +3159,63 @@ async def unbind_chat_cope_version(relation_id: str):
         return {"deleted": True, "relation_id": relation_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unbind chat cope version failed: {e}")
+
+
+# =========================================================================
+# 审核记录 API — 薄路由，业务逻辑在 business/audit/audit_service.py
+# =========================================================================
+
+
+@router.get("/audit-logs")
+async def list_audit_logs(
+    audit_status: Optional[str] = None,
+    trigger_source: Optional[str] = None,
+    node_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    keyword: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    """分页查询审核记录。"""
+    from business.audit.audit_service import list_audit_logs as _svc_list
+    return _svc_list(
+        audit_status=audit_status, trigger_source=trigger_source,
+        node_id=node_id, batch_id=batch_id, keyword=keyword,
+        limit=limit, offset=offset,
+    )
+
+
+@router.get("/audit-logs/{log_id}")
+async def get_audit_log(log_id: str):
+    """获取单条审核记录。"""
+    from business.audit.audit_service import get_audit_log as _svc_get
+    result = _svc_get(log_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Audit log not found")
+    return result
+
+
+@router.post("/audit-logs")
+async def create_audit_log(body: dict):
+    """创建审核记录。"""
+    from business.audit.audit_service import create_audit_log as _svc_create
+    log_id = _svc_create(body)
+    return {"id": log_id, "created": True}
+
+
+@router.put("/audit-logs/{log_id}")
+async def update_audit_log(log_id: str, body: dict):
+    """更新审核记录（复核字段+状态）。"""
+    from business.audit.audit_service import update_audit_log as _svc_update
+    ok = _svc_update(log_id, body)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Audit log not found")
+    return {"updated": True, "id": log_id}
+
+
+@router.delete("/audit-logs/{log_id}")
+async def delete_audit_log(log_id: str):
+    """软删除审核记录。"""
+    from business.audit.audit_service import delete_audit_log as _svc_delete
+    _svc_delete(log_id)
+    return {"deleted": True, "id": log_id}

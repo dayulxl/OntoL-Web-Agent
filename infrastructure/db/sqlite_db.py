@@ -312,6 +312,34 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         )
     """)
 
+    # ── 审核日志表 ──
+    _conn._exec("""
+        CREATE TABLE IF NOT EXISTS ontol_audit_log (
+            id                TEXT PRIMARY KEY,
+            node_id           TEXT    NOT NULL,
+            batch_id          TEXT    NOT NULL,
+            trigger_source    TEXT    NOT NULL DEFAULT 'MANUAL',
+            prompt_template   TEXT,
+            audit_status      TEXT    NOT NULL DEFAULT 'REVIEW',
+            llm_score         REAL,
+            fail_reason       TEXT,
+            suggested_data    TEXT,
+            input_snapshot    TEXT,
+            llm_raw_output    TEXT,
+            token_usage       TEXT,
+            model_version     TEXT,
+            duration_ms       INTEGER,
+            reviewer_id       TEXT,
+            review_comment    TEXT,
+            create_time       TEXT    NOT NULL DEFAULT (datetime('now')),
+            create_user       TEXT    NOT NULL DEFAULT '',
+            update_time       TEXT    NOT NULL DEFAULT '',
+            update_user       TEXT    NOT NULL DEFAULT '',
+            delete_flag       TEXT    NOT NULL DEFAULT '0',
+            is_system         TEXT    NOT NULL DEFAULT '0'
+        )
+    """)
+
     # ── 动态函数类型表 ──
     _conn._exec("""
         CREATE TABLE IF NOT EXISTS ontol_function_type (
@@ -395,6 +423,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         "ontol_datasource","ontol_datasource_log","ontol_scene_dictionary_relation",
         "ontol_llm_config","ontol_llm_type_config","ontol_function_type","ontol_function",
         "ontol_cope_version","ontol_chat_cope_version_relation",
+        "ontol_audit_log",
     ]
     for tbl in _MIGRATE_TABLES:
         cols = [r["name"] for r in _conn._run(f"PRAGMA table_info('{tbl}')")]
@@ -544,6 +573,18 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_occvr_cope ON ontol_chat_cope_version_relation(cope_version_id)")
     _conn._exec("CREATE INDEX IF NOT EXISTS idx_occvr_del ON ontol_chat_cope_version_relation(delete_flag)")
 
+    # ── ontol_audit_log 索引 ──
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_oal_node    ON ontol_audit_log(node_id)",
+        "CREATE INDEX IF NOT EXISTS idx_oal_batch   ON ontol_audit_log(batch_id)",
+        "CREATE INDEX IF NOT EXISTS idx_oal_status  ON ontol_audit_log(audit_status)",
+        "CREATE INDEX IF NOT EXISTS idx_oal_time    ON ontol_audit_log(create_time)",
+        "CREATE INDEX IF NOT EXISTS idx_oal_reviewer ON ontol_audit_log(reviewer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_oal_trigger ON ontol_audit_log(trigger_source)",
+        "CREATE INDEX IF NOT EXISTS idx_oal_del     ON ontol_audit_log(delete_flag)",
+    ]:
+        _conn._exec(idx_sql)
+
     # ═══════════════════════════════════════════════════════════
     # 种子数据
     # ═══════════════════════════════════════════════════════════
@@ -573,16 +614,16 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         ("ATTR_M1_NAME","M_ENTITY",        "名称",  "name","VARCHAR","100",a0,"0",a0,a0,a0,"1",a0,"0",a1,"实体名称",            "system",now),
         ("ATTR_M1_CODE","M_ENTITY",        "编码",  "code","VARCHAR","50", a0,"0",a0,a0,a0,"0",a0,"0",a1,"实体业务编码",        "system",now),
         ("ATTR_M1_DESC","M_ENTITY",        "描述",  "desc","VARCHAR","255",a0,"0",a0,a0,a0,"0",a0,"0",a1,"实体描述",            "system",now),
-        ("ATTR_M1_PRE", "M_ENTITY",        "触发前约束","hasPrecondition","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"SHACL: true/空→继续; false→停止","system",now),
-        ("ATTR_M1_EFF", "M_ENTITY",        "效果",  "hasEffect","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"语言触发(swrl/sh/owl2/rule/func)","system",now),
-        ("ATTR_M1_COST","M_ENTITY",        "消耗",  "hasCost","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"前置通过后执行,最多一个语言","system",now),
+        ("ATTR_M1_PRE", "M_ENTITY",        "触发前约束","precondition","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"SHACL: true/空→继续; false→停止","system",now),
+        ("ATTR_M1_EFF", "M_ENTITY",        "执行效果","effect","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"语言触发(swrl/sh/owl2/rule/func)","system",now),
+        ("ATTR_M1_COST","M_ENTITY",        "消耗",  "cost","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"前置通过后执行,最多一个语言","system",now),
         ("ATTR_M2_ID",  "M_BEHAVIOR",      "主键ID","id",  "VARCHAR","32", a0,"1",a0,a0,a0,"1",a0,"0",a1,"行为唯一标识符",      "system",now),
         ("ATTR_M2_NAME","M_BEHAVIOR",      "名称",  "name","VARCHAR","100",a0,"0",a0,a0,a0,"1",a0,"0",a1,"行为名称",            "system",now),
         ("ATTR_M2_CODE","M_BEHAVIOR",      "编码",  "code","VARCHAR","50", a0,"0",a0,a0,a0,"0",a0,"0",a1,"行为业务编码",        "system",now),
         ("ATTR_M2_DESC","M_BEHAVIOR",      "描述",  "desc","VARCHAR","255",a0,"0",a0,a0,a0,"0",a0,"0",a1,"行为描述",            "system",now),
-        ("ATTR_M2_PRE", "M_BEHAVIOR",      "触发前约束","hasPrecondition","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"SHACL语言: true/空→继续; false→停止本节点所有函数","system",now),
-        ("ATTR_M2_EFF", "M_BEHAVIOR",      "效果",  "hasEffect","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"语言触发(swrl/sh/owl2/rule/func前缀)","system",now),
-        ("ATTR_M2_COST","M_BEHAVIOR",      "消耗",  "hasCost","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"前置条件通过后执行,最多一个执行语言","system",now),
+        ("ATTR_M2_PRE", "M_BEHAVIOR",      "触发前约束","precondition","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"SHACL语言: true/空→继续; false→停止本节点所有函数","system",now),
+        ("ATTR_M2_EFF", "M_BEHAVIOR",      "执行效果","effect","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"语言触发(swrl/sh/owl2/rule/func前缀)","system",now),
+        ("ATTR_M2_COST","M_BEHAVIOR",      "消耗",  "cost","VARCHAR","500",a0,"0",a0,a0,a0,"0",a0,"0",a1,"前置条件通过后执行,最多一个执行语言","system",now),
         ("ATTR_M4_ID",  "M_SCENE",         "主键ID","id",  "VARCHAR","32", a0,"1",a0,a0,a0,"1",a0,"0",a1,"场景唯一标识符",      "system",now),
         ("ATTR_M4_NAME","M_SCENE",         "名称",  "name","VARCHAR","100",a0,"0",a0,a0,a0,"1",a0,"0",a1,"场景名称",            "system",now),
         ("ATTR_M4_CODE","M_SCENE",         "编码",  "code","VARCHAR","50", a0,"0",a0,a0,a0,"0",a0,"0",a1,"场景业务编码",        "system",now),

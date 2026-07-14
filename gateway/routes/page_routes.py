@@ -349,3 +349,14 @@ async def function_manager_page(request: Request):
         "trace_id": ctx.get("trace_id", "-"),
         "user_id": ctx.get("user_id", "anonymous"),
     })
+
+
+# 审核记录页面 — 路由注册在 page_routes，业务逻辑在 business/audit/
+@router.get("/audit-log", response_class=HTMLResponse)
+async def audit_log_page(request: Request):
+    ctx = request_context.get()
+    return _render("pages/audit_log.html", {
+        "request": request,
+        "trace_id": ctx.get("trace_id", "-"),
+        "user_id": ctx.get("user_id", "anonymous"),
+    })

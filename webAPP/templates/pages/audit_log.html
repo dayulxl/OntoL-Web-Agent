@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+{% block title %}审核记录 — LangGraph Cluster{% endblock %}
+
+{% block extra_head %}
+<style>
+.container { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+footer { display: none; }
+
+.al-layout {
+    min-height: calc(100vh - 60px);
+    background: rgba(8,12,32,0.96);
+    padding: 1.5rem 2rem;
+}
+
+/* ── 统计卡片 ── */
+.al-stats { display: flex; gap: 1rem; margin-bottom: 1.2rem; }
+.al-stat-card {
+    flex: 1; min-width: 140px; padding: 1rem 1.2rem;
+    border-radius: 8px; border: 1px solid var(--border);
+    background: rgba(0,212,255,0.03);
+    display: flex; align-items: center; gap: 0.8rem;
+}
+.al-stat-card .icon { font-size: 1.8rem; opacity: 0.7; }
+.al-stat-card .val { font-size: 1.6rem; font-weight: 700; color: #fff; }
+.al-stat-card .lbl { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.al-stat-card.pass { border-color: rgba(34,197,94,0.25); }
+.al-stat-card.pass .val { color: #22c55e; }
+.al-stat-card.fail { border-color: rgba(239,68,68,0.25); }
+.al-stat-card.fail .val { color: #ef4444; }
+.al-stat-card.review { border-color: rgba(245,158,11,0.25); }
+.al-stat-card.review .val { color: #f59e0b; }
+
+/* ── 工具栏 ── */
+.al-toolbar {
+    display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center;
+    padding: 0.8rem 1rem; background: rgba(0,212,255,0.03);
+    border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1rem;
+}
+.al-toolbar select, .al-toolbar input {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    color: var(--text); padding: 0.4rem 0.6rem; border-radius: 4px;
+    font-size: 0.78rem; outline: none; font-family: inherit;
+}
+.al-toolbar select:focus, .al-toolbar input:focus { border-color: var(--accent); }
+.al-toolbar .spacer { flex: 1; }
+.al-toolbar .btn { font-size: 0.78rem; padding: 0.4rem 0.8rem; }
+
+/* ── 表格 ── */
+.al-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.al-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.al-table th {
+    text-align: left; padding: 0.55rem 0.7rem;
+    background: rgba(0,212,255,0.06); color: var(--accent);
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.al-table td {
+    padding: 0.45rem 0.7rem; border-bottom: 1px solid rgba(0,212,255,0.06);
+    color: var(--text); font-size: 0.78rem; white-space: nowrap;
+}
+.al-table tr:hover td { background: rgba(0,212,255,0.03); cursor: pointer; }
+.al-table .cell-id { font-family: "SF Mono","Fira Code",monospace; font-size: 0.72rem; color: var(--text-dim); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+.al-table .cell-reason { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 状态徽标 */
+.al-badge {
+    display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px;
+    font-size: 0.68rem; font-weight: 600;
+}
+.al-badge.pass   { background: rgba(34,197,94,0.12);  color: #22c55e; }
+.al-badge.fail   { background: rgba(239,68,68,0.12);  color: #ef4444; }
+.al-badge.review { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.al-badge.auto   { background: rgba(0,212,255,0.1);   color: var(--accent); }
+.al-badge.manual { background: rgba(124,58,237,0.1);  color: #a78bfa; }
+
+/* ── 分页 ── */
+.al-pager {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    padding: 0.8rem; font-size: 0.78rem; color: var(--text-dim);
+}
+.al-pager button {
+    padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 4px;
+    background: rgba(0,212,255,0.04); color: var(--text); cursor: pointer;
+    font-size: 0.75rem; font-family: inherit;
+}
+.al-pager button:hover { border-color: var(--accent); color: var(--accent); }
+.al-pager button:disabled { opacity: 0.3; cursor: not-allowed; }
+.al-pager .page-info { padding: 0 0.5rem; }
+
+/* ── 详情弹窗 ── */
+.al-modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center;
+    z-index: 200;
+}
+.al-modal-overlay.open { display: flex; }
+.al-modal {
+    background: rgba(8,12,32,0.98); border: 1px solid var(--accent);
+    border-radius: 12px; padding: 1.8rem; width: 820px; max-width: 92vw;
+    max-height: 85vh; overflow-y: auto; position: relative;
+}
+.al-modal h3 { margin: 0 0 1.2rem; color: var(--accent); font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
+.al-modal .close-btn {
+    position: absolute; top: 1rem; right: 1.2rem;
+    background: none; border: none; color: var(--text-dim); font-size: 1.3rem;
+    cursor: pointer; padding: 0.2rem 0.4rem; border-radius: 4px;
+}
+.al-modal .close-btn:hover { color: #fff; background: rgba(255,255,255,0.06); }
+.al-modal .kv-grid { display: grid; grid-template-columns: 140px 1fr; gap: 0.4rem 0.8rem; font-size: 0.82rem; margin-bottom: 1.2rem; }
+.al-modal .kv-grid .k { color: var(--text-dim); text-align: right; }
+.al-modal .kv-grid .v { color: var(--text); word-break: break-all; }
+.al-modal .section-title {
+    font-size: 0.78rem; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 0.5px; margin: 1rem 0 0.5rem; padding-bottom: 0.3rem;
+    border-bottom: 1px solid rgba(0,212,255,0.1);
+}
+.al-modal pre {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.8rem; font-size: 0.75rem;
+    color: var(--text); overflow-x: auto; white-space: pre-wrap;
+    word-break: break-all; max-height: 260px; overflow-y: auto;
+    font-family: "SF Mono","Fira Code","Cascadia Code",monospace;
+}
+
+/* ── 加载/空状态 ── */
+.al-loading { text-align: center; padding: 3rem; color: var(--text-dim); }
+.al-spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; vertical-align: middle; margin-right: 0.5rem; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.al-empty { text-align: center; padding: 4rem 1rem; color: var(--text-dim); }
+.al-empty .icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.35; }
+
+@media (max-width: 900px) {
+    .al-layout { padding: 1rem; }
+    .al-stats { flex-wrap: wrap; }
+    .al-stat-card { min-width: 100px; }
+    .al-stat-card .val { font-size: 1.2rem; }
+    .al-modal { width: 96vw; padding: 1.2rem; }
+    .al-modal .kv-grid { grid-template-columns: 100px 1fr; }
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+<div class="al-layout">
+
+    <!-- ═══════════════════════════════════════════ 统计卡片 ═══════════════════════════════════════════ -->
+    <div class="al-stats" id="statCards">
+        <div class="al-stat-card"><span class="icon">📋</span><div><div class="val" id="statTotal">-</div><div class="lbl">审核总数</div></div></div>
+        <div class="al-stat-card pass"><span class="icon">✅</span><div><div class="val" id="statPass">-</div><div class="lbl">通过</div></div></div>
+        <div class="al-stat-card fail"><span class="icon">❌</span><div><div class="val" id="statFail">-</div><div class="lbl">未通过</div></div></div>
+        <div class="al-stat-card review"><span class="icon">🔍</span><div><div class="val" id="statReview">-</div><div class="lbl">待复核</div></div></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ 工具栏 ═══════════════════════════════════════════ -->
+    <div class="al-toolbar">
+        <select id="filterStatus" onchange="doSearch()">
+            <option value="">全部状态</option>
+            <option value="PASS">通过</option>
+            <option value="FAIL">未通过</option>
+            <option value="REVIEW">待复核</option>
+        </select>
+        <select id="filterTrigger" onchange="doSearch()">
+            <option value="">全部触发源</option>
+            <option value="AUTO_LOOP">自动巡检</option>
+            <option value="MANUAL">人工触发</option>
+        </select>
+        <input type="text" id="filterNodeId" placeholder="节点ID..." oninput="doSearch()" style="width:140px;" />
+        <input type="text" id="filterBatch" placeholder="批次号..." oninput="doSearch()" style="width:140px;" />
+        <input type="text" id="filterSearch" placeholder="搜索关键词..." oninput="doSearch()" style="width:160px;" />
+        <span class="spacer"></span>
+        <button class="btn btn-accent" onclick="doSearch()">🔍 查询</button>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ 数据表格 ═══════════════════════════════════════════ -->
+    <div class="al-table-wrap">
+        <table class="al-table">
+            <thead>
+                <tr>
+                    <th>审核ID</th>
+                    <th>节点ID</th>
+                    <th>批次号</th>
+                    <th>触发源</th>
+                    <th>状态</th>
+                    <th>置信度</th>
+                    <th>模型</th>
+                    <th>耗时(ms)</th>
+                    <th>复核人</th>
+                    <th>时间</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <tr><td colspan="10"><div class="al-loading"><span class="al-spinner"></span>加载中...</div></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ 分页 ═══════════════════════════════════════════ -->
+    <div class="al-pager" id="pager"></div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════ 详情弹窗 ═══════════════════════════════════════════ -->
+<div class="al-modal-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
+    <div class="al-modal" id="detailContent"></div>
+</div>
+{% endblock %}
+
+
+{% block extra_scripts %}
+<script>
+// ═══════════════════════════════════════════════════════════
+// 常量 & API
+// ═══════════════════════════════════════════════════════════
+var API_AUDIT = '/api/v1/audit-logs';
+var PAGE_SIZE = 20;
+var currentPage = 1;
+var totalCount = 0;
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function apiGet(url) { var r = await fetch(url); if (!r.ok) throw new Error((await r.json()).detail || r.statusText); return r.json(); }
+
+function statusBadge(s) {
+    var cls = s === 'PASS' ? 'pass' : s === 'FAIL' ? 'fail' : 'review';
+    var txt = s === 'PASS' ? '通过' : s === 'FAIL' ? '未通过' : '待复核';
+    return '<span class="al-badge ' + cls + '">' + txt + '</span>';
+}
+function triggerBadge(s) {
+    if (s === 'AUTO_LOOP') return '<span class="al-badge auto">自动巡检</span>';
+    return '<span class="al-badge manual">人工触发</span>';
+}
+
+// ═══════════════════════════════════════════════════════════
+// 查询 & 渲染
+// ═══════════════════════════════════════════════════════════
+
+function buildQuery() {
+    var params = ['limit=' + PAGE_SIZE, 'offset=' + ((currentPage-1) * PAGE_SIZE)];
+    var status = document.getElementById('filterStatus').value;
+    var trigger = document.getElementById('filterTrigger').value;
+    var nodeId = document.getElementById('filterNodeId').value.trim();
+    var batch = document.getElementById('filterBatch').value.trim();
+    var kw = document.getElementById('filterSearch').value.trim();
+    if (status) params.push('audit_status=' + encodeURIComponent(status));
+    if (trigger) params.push('trigger_source=' + encodeURIComponent(trigger));
+    if (nodeId) params.push('node_id=' + encodeURIComponent(nodeId));
+    if (batch) params.push('batch_id=' + encodeURIComponent(batch));
+    if (kw) params.push('keyword=' + encodeURIComponent(kw));
+    return '?' + params.join('&');
+}
+
+function doSearch(page) {
+    if (page) currentPage = page;
+    else currentPage = 1;
+    loadData();
+}
+
+async function loadData() {
+    try {
+        var data = await apiGet(API_AUDIT + buildQuery());
+        totalCount = data.total || 0;
+        renderTable(data.rows || []);
+        renderPager();
+        updateStats(data.stats || {});
+    } catch(e) {
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="10"><div class="al-empty"><div class="icon">⚠️</div><p>加载失败: ' + escHtml(e.message) + '</p></div></td></tr>';
+    }
+}
+
+function renderTable(rows) {
+    var tbody = document.getElementById('tableBody');
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10"><div class="al-empty"><div class="icon">📭</div><p>暂无审核记录</p></div></td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(function(r) {
+        return '<tr onclick="showDetail(\'' + r.id + '\')" title="点击查看详情">' +
+            '<td class="cell-id" title="' + escHtml(r.id) + '">' + escHtml(r.id) + '</td>' +
+            '<td class="cell-id">' + escHtml(r.node_id||'-') + '</td>' +
+            '<td class="cell-id">' + escHtml((r.batch_id||'').substring(0,12)) + '</td>' +
+            '<td>' + triggerBadge(r.trigger_source) + '</td>' +
+            '<td>' + statusBadge(r.audit_status) + '</td>' +
+            '<td>' + (r.llm_score != null ? (r.llm_score * 100).toFixed(0) + '%' : '-') + '</td>' +
+            '<td>' + escHtml(r.model_version||'-') + '</td>' +
+            '<td>' + (r.duration_ms != null ? r.duration_ms : '-') + '</td>' +
+            '<td>' + escHtml(r.reviewer_id||'-') + '</td>' +
+            '<td>' + escHtml((r.create_time||'').substring(0,16)) + '</td>' +
+            '</tr>';
+    }).join('');
+}
+
+function renderPager() {
+    var totalPages = Math.ceil(totalCount / PAGE_SIZE);
+    var html = '';
+    html += '<button ' + (currentPage <= 1 ? 'disabled' : '') + ' onclick="doSearch(' + (currentPage-1) + ')">◀ 上一页</button>';
+    html += '<span class="page-info">第 ' + currentPage + ' / ' + (totalPages||1) + ' 页 (共 ' + totalCount + ' 条)</span>';
+    html += '<button ' + (currentPage >= totalPages ? 'disabled' : '') + ' onclick="doSearch(' + (currentPage+1) + ')">下一页 ▶</button>';
+    document.getElementById('pager').innerHTML = html;
+}
+
+function updateStats(s) {
+    document.getElementById('statTotal').textContent = s.total || 0;
+    document.getElementById('statPass').textContent = s.pass || 0;
+    document.getElementById('statFail').textContent = s.fail || 0;
+    document.getElementById('statReview').textContent = s.review || 0;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 详情弹窗
+// ═══════════════════════════════════════════════════════════
+
+async function showDetail(id) {
+    var overlay = document.getElementById('detailOverlay');
+    var content = document.getElementById('detailContent');
+    overlay.classList.add('open');
+    content.innerHTML = '<div class="al-loading"><span class="al-spinner"></span>加载详情...</div>';
+    try {
+        var r = await apiGet(API_AUDIT + '/' + encodeURIComponent(id));
+        content.innerHTML =
+            '<button class="close-btn" onclick="closeDetail()">✕</button>' +
+            '<h3>' + statusBadge(r.audit_status) + ' 审核详情</h3>' +
+            '<div class="kv-grid">' +
+                '<span class="k">审核ID</span><span class="v"><code>' + escHtml(r.id) + '</code></span>' +
+                '<span class="k">节点ID</span><span class="v"><code>' + escHtml(r.node_id||'-') + '</code></span>' +
+                '<span class="k">批次号</span><span class="v"><code>' + escHtml(r.batch_id||'-') + '</code></span>' +
+                '<span class="k">触发源</span><span class="v">' + triggerBadge(r.trigger_source) + '</span>' +
+                '<span class="k">审核状态</span><span class="v">' + statusBadge(r.audit_status) + '</span>' +
+                '<span class="k">置信度</span><span class="v">' + (r.llm_score != null ? (r.llm_score * 100).toFixed(1) + '%' : '-') + '</span>' +
+                '<span class="k">模型版本</span><span class="v">' + escHtml(r.model_version||'-') + '</span>' +
+                '<span class="k">处理耗时</span><span class="v">' + (r.duration_ms != null ? r.duration_ms + ' ms' : '-') + '</span>' +
+                '<span class="k">Token消耗</span><span class="v"><code>' + escHtml(r.token_usage||'-') + '</code></span>' +
+                '<span class="k">复核人</span><span class="v">' + escHtml(r.reviewer_id||'-') + '</span>' +
+                '<span class="k">复核意见</span><span class="v">' + escHtml(r.review_comment||'-') + '</span>' +
+                '<span class="k">创建时间</span><span class="v">' + escHtml(r.create_time||'-') + '</span>' +
+            '</div>' +
+            (r.prompt_template ? '<div class="section-title">📝 审核规则/提示词</div><pre>' + escHtml(r.prompt_template) + '</pre>' : '') +
+            (r.fail_reason ? '<div class="section-title">⚠️ 违规/异常原因</div><pre style="border-color:rgba(239,68,68,0.2);">' + escHtml(r.fail_reason) + '</pre>' : '') +
+            (r.suggested_data ? '<div class="section-title">💡 建议修正数据</div><pre>' + tryFormatJson(r.suggested_data) + '</pre>' : '') +
+            '<div class="section-title">📥 原始输入快照</div><pre>' + escHtml(r.input_snapshot||'(无)') + '</pre>' +
+            '<div class="section-title">🤖 LLM 原始输出</div><pre>' + escHtml(r.llm_raw_output||'(无)') + '</pre>';
+    } catch(e) {
+        content.innerHTML = '<button class="close-btn" onclick="closeDetail()">✕</button><h3>加载失败</h3><p style="color:#ef4444;">' + escHtml(e.message) + '</p>';
+    }
+}
+
+function tryFormatJson(s) {
+    try { return escHtml(JSON.stringify(JSON.parse(s), null, 2)); }
+    catch(e) { return escHtml(s); }
+}
+
+function closeDetail() {
+    document.getElementById('detailOverlay').classList.remove('open');
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeDetail();
+});
+
+// ═══════════════════════════════════════════════════════════
+// 初始化
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+    loadData();
+});
+</script>
+{% endblock %}
