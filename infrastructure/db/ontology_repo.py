@@ -166,3 +166,133 @@ class OntologyRepo:
                 "model_count": 0, "attr_count": 0, "scene_count": 0,
                 "prompt_count": 0, "dict_count": 0, "dict_type_count": 0, "dict_rel_count": 0,
             }
+
+
+# =========================================================================
+# [FEAT] SQLite 同步写操作 — 批量导入模型 & 字段（不走 asyncpg，直接写 SQLite）
+# =========================================================================
+
+import sqlite3 as _sqlite3
+from business.tool.uuid_gen import new_id
+from pathlib import Path as _Path
+from datetime import datetime as _datetime
+
+_SQLITE_PATH = str(_Path(__file__).parent / "ontol.db")
+
+
+def _now() -> str:
+    return _datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def batch_insert_models(
+    models: list[dict],
+    table: str = "ontol_model",
+    parent_col: str = "ontol_parent_id",
+    desc_col: str = "ontol_model_desc",
+) -> int:
+    """批量插入本体模型 — service 传对象，DB 层拼 SQL 执行。"""
+    conn = _sqlite3.connect(_SQLITE_PATH)
+    now = _now()
+    created = 0
+    try:
+        for m in models:
+            rid = m.get("id") or new_id()
+            conn.execute(
+                f"INSERT INTO [{table}] "
+                f"(id, name, code, {parent_col}, ontol_data_type, {desc_col}, "
+                f" ontol_model_status, create_time, delete_flag) "
+                f"VALUES (?,?,?,?,?,?,?,?,?)",
+                (rid, m["name"], m["code"], m.get("parent_id"),
+                 m.get("type_code", ""), m.get("desc", ""), "0", now, "0"),
+            )
+            created += 1
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return created
+
+
+def list_existing_codes(table: str = "ontol_model") -> set[str]:
+    """查询表中已有编码集合 — 用于导入前查重。"""
+    conn = _sqlite3.connect(_SQLITE_PATH)
+    try:
+        rows = conn.execute(
+            f"SELECT code FROM [{table}] WHERE delete_flag='0'"
+        ).fetchall()
+        return {r[0] for r in rows}
+    finally:
+        conn.close()
+
+
+def batch_insert_attrs(attrs: list[dict], model_id: str, attr_mapping: str = "00") -> int:
+    """批量插入字段 — service 传对象，DB 层拼 SQL 执行。"""
+    conn = _sqlite3.connect(_SQLITE_PATH)
+    now = _now()
+    created = 0
+    try:
+        for a in attrs:
+            rid = new_id()
+            conn.execute(
+                "INSERT INTO ontol_model_attr "
+                "(id, ontol_model_id, name, code, attr_data_type, attr_length, "
+                " attr_required, attr_is_only, attr_default_value, attr_desc, "
+                " attr_is_system, attr_mapping, create_time, delete_flag) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'0')",
+                (rid, model_id, a.get("name", a.get("code", "")), a["code"],
+                 a.get("data_type", "VARCHAR"), a.get("length", ""),
+                 a.get("required", "0"), a.get("is_only", "0"),
+                 a.get("default", ""), a.get("desc", ""), "0", attr_mapping, now),
+            )
+            created += 1
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return created
+
+
+def update_attr_by_code(model_id: str, code: str, updates: dict) -> bool:
+    """按 model_id + code 更新字段。"""
+    field_map = {
+        "name": "name", "data_type": "attr_data_type", "length": "attr_length",
+        "required": "attr_required", "is_only": "attr_is_only",
+        "default": "attr_default_value", "desc": "attr_desc",
+    }
+    sets, vals = [], []
+    for ek, col in field_map.items():
+        if ek in updates and updates[ek]:
+            sets.append(f"{col}=?")
+            vals.append(updates[ek])
+    if not sets:
+        return False
+    vals.extend([model_id, code])
+    conn = _sqlite3.connect(_SQLITE_PATH)
+    try:
+        conn.execute(
+            f"UPDATE ontol_model_attr SET {', '.join(sets)} "
+            f"WHERE ontol_model_id=? AND code=?", tuple(vals))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def delete_attr_by_code(model_id: str, code: str) -> bool:
+    """按 model_id + code 删除字段。"""
+    conn = _sqlite3.connect(_SQLITE_PATH)
+    try:
+        conn.execute(
+            "DELETE FROM ontol_model_attr WHERE ontol_model_id=? AND code=? AND attr_is_system!='1'",
+            (model_id, code))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+    return True
+
+

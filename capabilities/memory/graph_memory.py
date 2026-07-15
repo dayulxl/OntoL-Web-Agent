@@ -21,7 +21,7 @@ class GraphMemory:
     通过 langchain-neo4j 的 Neo4jGraph 兼容 LangChain 生态。
 
     使用方式:
-        from infrastructure.db.neo4j import get_driver
+        from infrastructure.graph.neo4j import get_driver
         driver = await get_driver()
         graph = GraphMemory(driver)
         nodes = await graph.list_nodes("Entity", limit=50)

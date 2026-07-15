@@ -1,5 +1,5 @@
 """实体导入服务 — 将解析后的实体/关系写入图数据库（Memgraph/Neo4j）。"""
-import uuid as _uuid
+from business.tool.uuid_gen import new_id
 from typing import Any
 
 from business.ontology import get_inherited_fields
@@ -31,7 +31,7 @@ async def import_entities_to_graph(
 
     流程: 查询已有ID → 雪花ID映射 → 创建节点(补全字段) → 创建关系 → 场景绑定
     """
-    from infrastructure.db.neo4j import get_driver
+    from infrastructure.graph.neo4j import get_driver
 
     driver = await get_driver()
     filled_fields_count = 0
@@ -148,7 +148,7 @@ def _bind_entities_to_scenes(entities: list[dict], scene_ids: list[str]) -> int:
                 try:
                     conn.execute(
                         "INSERT INTO ontol_node_scene_relation (id, scene_id, scene_desc) VALUES (?,?,?)",
-                        (_uuid.uuid4().hex[:16], sid, entity_name),
+                        (new_id(), sid, entity_name),
                     )
                     count += 1
                 except Exception:

@@ -6,7 +6,7 @@
 此类实现 GraphExtension 协议，是产品层对外提供的默认实现。
 业务图继承此类即可满足 GraphExtension 契约。
 """
-import uuid
+from business.tool.uuid_gen import new_id
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator, Optional
 
@@ -97,7 +97,7 @@ class BaseWorkflowGraph(GraphExtension, ABC):
         """构造 LangGraph 运行配置。"""
         return {
             "configurable": {
-                "thread_id": thread_id or str(uuid.uuid4()),
+                "thread_id": thread_id or new_id(),
                 "user_id": user_id or "system",
             }
         }

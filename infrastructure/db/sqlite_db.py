@@ -548,10 +548,11 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
             WHERE delete_flag = '0' GROUP BY code
         ) AND delete_flag = '0'
     """)
-    _conn._exec(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_oma_code_active "
-        "ON ontol_model_attr(code) WHERE delete_flag = '0'"
-    )
+    # [FIX] 移除全局 code 唯一索引 — 不同模型允许同 code（已有同模型内唯一索引 idx_oma_model_code_active）
+    # _conn._exec(
+    #     "CREATE UNIQUE INDEX IF NOT EXISTS idx_oma_code_active "
+    #     "ON ontol_model_attr(code) WHERE delete_flag = '0'"
+    # )
 
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_oms_del ON ontol_model_scene(delete_flag)",
@@ -654,6 +655,7 @@ async def create_sqlite_db(path: Optional[str] = None) -> _Pool:
         ("M_QUALITY",     "M_QUALITY",          "M_ROOT",   "质量约束",   "M7", "0", "数据质量校验约束与度量",           "system", now),
         ("M_EVENT",       "M_EVENT",            "M_ROOT",   "事件",       "ME", "0", "本体中发生的状态变化事件",         "system", now),
         ("M_TEMPLATE",    "M_TEMPLATE",         "M_ROOT",   "模板",       "MT", "0", "可复用的本体模板定义",             "system", now),
+        ("R_ROOT",        "R_ROOT",             None,       "基本关系-边","R0", "0", "所有关系类型（边）的根节点",         "system", now),
     ]
     for m in models:
         _conn._exec(

@@ -58,8 +58,9 @@ def resolve_llm(config_id: str = "") -> ModelInterface:
     if not row:
         raise ValueError(f"LLM 配置 '{config_id}' 不存在或已被删除")
 
+    from business.llm.llm_config_service import resolve_api_key
     return factory.create_llm_from_config(
         base_url=row["llm_url"] or "",
-        api_key=row["llm_key"] or "",
+        api_key=resolve_api_key(config_id),
         model_name=row["llm_model"] or row["name"],
     )

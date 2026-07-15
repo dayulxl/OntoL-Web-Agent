@@ -9,7 +9,6 @@
 - localStorage（浏览器）：消息内容、场景绑定 ID 等运行时数据
 """
 import sqlite3
-import uuid as _uuid
 from pathlib import Path
 from typing import Any, Optional
 

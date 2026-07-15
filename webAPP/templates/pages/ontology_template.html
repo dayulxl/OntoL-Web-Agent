@@ -35,14 +35,14 @@ footer { display: none; }
 
 /* 工具栏 */
 .sb-toolbar { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
-.sb-toolbar .sb-btn {
-    font-size: 0.68rem; padding: 0.25rem 0.55rem;
+.sb-toolbar .sb-btn, .ot-sidebar-title .sb-btn {
+    font-size: 0.85rem; padding: 0.4rem 0.9rem;
     border: 1px solid var(--border); border-radius: 4px;
     background: rgba(0, 212, 255, 0.06); color: var(--text-dim);
     cursor: pointer; transition: all 0.15s; font-family: inherit; white-space: nowrap;
 }
-.sb-toolbar .sb-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0, 212, 255, 0.12); }
-.sb-toolbar .sb-btn.accent { background: rgba(0,212,255,0.15); border-color: var(--accent); color: var(--accent); }
+.sb-toolbar .sb-btn:hover, .ot-sidebar-title .sb-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0, 212, 255, 0.12); }
+.sb-toolbar .sb-btn.accent, .ot-sidebar-title .sb-btn.accent { background: rgba(0,212,255,0.15); border-color: var(--accent); color: var(--accent); }
 .sb-toolbar .sb-search {
     background: rgba(0, 212, 255, 0.04); border: 1px solid var(--border);
     border-radius: 4px; color: var(--text); font-size: 0.7rem;
@@ -192,7 +192,12 @@ footer { display: none; }
         <div class="ot-sidebar-header">
             <div class="ot-sidebar-title" style="display:flex;justify-content:space-between;align-items:center;">
                 <span>🌳 本体模型树</span>
-                <button class="sb-btn accent" onclick="showCreateRootForm()">＋ 新建</button>
+                <div style="display:flex;gap:0.2rem;flex-shrink:0;">
+                    <button class="sb-btn accent" onclick="downloadModelImportTemplate()" title="下载导入模板">📋 模板</button>
+                    <button class="sb-btn accent" onclick="document.getElementById('importModelFile').click()" title="Excel批量导入模型">📥 导入</button>
+                    <input type="file" id="importModelFile" accept=".xlsx,.xls" style="display:none;" onchange="importModelsFromExcel(this)" />
+                    <button class="sb-btn accent" onclick="showCreateRootForm()">＋ 新建</button>
+                </div>
             </div>
             <div class="sb-toolbar">
                 <button class="sb-btn" onclick="treeView.expandAll()" title="全部展开">📂</button>
@@ -745,17 +750,17 @@ async function createRootModel() {
 
 async function refreshAfterChange() {
     try {
-        var data = await apiGet(API_MODEL + '/tree?with_attrs=true');
+        // 调 page_routes._build_model_tree_for_view 返回树形数据
+        var data = await apiGet(API_MODEL + '/tree?attr_mapping=' + ATTR_MAPPING);
         treeData = data;
         updateFooter(data);
-        // 重新初始化树（传入最新数据，而非预加载的旧数据）
         initTreeView(data);
         if (activeModel) {
             try {
                 var model = await apiGet(API_MODEL + '/' + encodeURIComponent(activeModel.id) + '?with_attrs=true');
                 activeModel = model;
                 renderDetail(model);
-            } catch(e) {}
+            } catch(_) {}
         }
     } catch(e) { console.error('刷新失败:', e); }
 }
@@ -801,7 +806,46 @@ document.addEventListener('DOMContentLoaded', function() {
 // ═══════════════════════════════════════════════
 // Excel 批量导入/导出
 // [FEAT] 下载模板 + 上传Excel批量管理字段(新增/修改/删除)
+// [FEAT] 模型Excel批量导入 — 序号→UUID，父级序号→parent_id
 // 影响范围: /ontology-template 和 /business-semantic 共享
+// ═══════════════════════════════════════════════
+
+// [FEAT] 批量导入模型 — Excel 每行一个模型
+async function importModelsFromExcel(input) {
+    var f = input.files[0];
+    if (!f) return;
+    if (!confirm(
+        '即将从 Excel 批量导入模型。\\n\\n' +
+        'Excel 格式要求:\\n' +
+        '  序号 | 名称 | 编码 | 父级序号 | 类型 | 描述\\n\\n' +
+        '• 序号为 Excel 内部序号，仅用于标识父级关系\\n' +
+        '• 父级序号引用同一 Excel 中另一行的序号\\n' +
+        '• 每个模型会自动分配新 ID\\n\\n' +
+        '确定继续？'
+    )) { input.value = ''; return; }
+
+    var fd = new FormData();
+    fd.append('file', f);
+    try {
+        var url = API_MODEL + '/import-models?attr_mapping=' + ATTR_MAPPING;
+        var r = await fetch(url, {method:'POST', body:fd});
+        var data = await r.json();
+        if (!r.ok) throw new Error(data.detail || '导入失败');
+        showToast('导入完成: 创建 ' + data.created + ' 个模型 (共' + data.total_rows + '行)');
+        await refreshAfterChange();
+    } catch(e) {
+        alert('导入失败:\\n\\n' + e.message);
+    }
+    input.value = '';
+}
+
+// [FEAT] 下载模型导入Excel模板
+function downloadModelImportTemplate() {
+    window.open(API_MODEL + '/import-template?attr_mapping=' + ATTR_MAPPING, '_blank');
+}
+
+// ================================================================
+// Excel 批量导入/导出 字段
 // ═══════════════════════════════════════════════
 var _excelModelId = null;
 

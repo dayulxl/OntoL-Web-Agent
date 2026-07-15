@@ -9,7 +9,7 @@ from typing import Optional
 
 from common.exceptions.base import InfrastructureError as GraphQueryError
 from common.utils.logger import get_logger
-from infrastructure.db.neo4j import get_driver
+from infrastructure.graph.neo4j import get_driver
 
 logger = get_logger(__name__)
 

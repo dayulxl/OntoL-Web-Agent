@@ -61,8 +61,9 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   ├── api/                         # 🆕 对外接口层 — 唯一合法入口，不写业务，只做 re-export + 转换 + 分发
 │   │   └── __init__.py             #   facade：from business.api import submit_audit（按需扩展子模块）
 │   ├── tool/                        # 🆕 通用工具集 (纯工具, 无业务代码, 跨域复用)
-│   │   └── snowflake.py             #   SnowflakeGenerator — 64位雪花ID生成；generate_snowflake_ids(entities) 纯算法，不查库
-│   │   ├── excel_handler.py           #   通用 Excel 读写 (样式/冻结/筛选) — 无业务逻辑
+│   │   ├── snowflake.py             #   SnowflakeGenerator — 64位雪花ID生成 (图节点 int64)
+│   │   ├── uuid_gen.py              #   统一 new_id() — 16位十六进制 UUID (SQLite 主键)
+│   │   └── excel_handler.py         #   通用 Excel 读写 (样式/冻结/筛选下拉/StreamingResponse)
 │   ├── ontology/                    # 🆕 本体类型加载器 (共享基础设施)
 │   │   └── __init__.py             #   load_ontology_types + get_inherited_fields
 │   ├── reasoning/                  # 图推理机业务域
@@ -94,7 +95,7 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   │   ├── parser.py                #   文件文本提取 + JSON 解析 + 两阶段解析管线
 │   │   ├── validation.py            #   模板匹配 + 继承链缺失字段计算
 │   │   ├── import_service.py        #   雪花ID映射→创建节点→创建关系→场景绑定
-│   │   ├── excel_service.py           #   Excel 批量导入导出 (新增/修改/删除字段)
+│   │   ├── excel_service.py           #   Excel 批量导入导出 (模型+字段, 对象构建不写SQL)
 │   ├── quality/                      # 🆕 数据质量分析业务域
 │   │   └── analyzer.py            #   五维度质量分析 (完整性/一致性/唯一性/时效性/覆盖率)
 │   ├── audit/                       # 🆕 审核记录业务域
@@ -124,12 +125,17 @@ LangChain/LangGraph 集群化智能服务平台 — FastAPI + LangGraph + Memgra
 │   ├── exceptions/base.py          # 统一异常定义
 │   └── utils/logger.py             # structlog 结构化日志
 ├── infrastructure/         # 基础设施
-│   └── db/
-│       ├── neo4j.py                # Memgraph 驱动 (memgraph://→bolt://)
+│   ├── db/                        # 关系型数据库 (SQLite / PostgreSQL)
+│       ├── base_repo.py            # 对象↔SQL 双向映射层 — insert/update/delete/list/search/upsert
+│       ├── ontology_repo.py        # 本体模型数据访问层 — 树形查询 + 批量导入模型/字段 (调用 base_repo)
 │       ├── sqlite_db.py            # SQLite 自动建表+种子
-│       ├── base_repo.py            # PostgreSQL/asyncpg 通用 Repository (CRUD 基类)
-│       ├── ontology_repo.py        # 本体模型树形查询 + 属性查询
-│       └── ontol.db                # 本体模型数据库 (14 张表)
+│       └── ontol.db                # 本体模型数据库 (21 张表)
+│   ├── graph/                      # 图数据库 (Memgraph)
+│       └── neo4j.py                # Memgraph 驱动 (memgraph://→bolt:// 连接池)
+│       ├── sqlite_db.py            # SQLite 自动建表+种子
+│       ├── base_repo.py            # 对象↔SQL 双向映射层 — insert/update/delete/list/search/upsert
+│       ├── ontology_repo.py        # 本体模型数据访问层 — 树形查询 + 批量导入模型/字段 (调用 base_repo)
+│       └── ontol.db                # 本体模型数据库 (21 张表)
 ├── webAPP/                 # 前端资源 (运行时加载)
 │   ├── templates/                  # Jinja2 模板 (活跃)
 │   │   ├── pages/                  #   页面模板 (14 个)
@@ -446,6 +452,106 @@ async for event in step4_reason(seed_node_id, self.cm, self.ancestors, threshold
 | 能力层 | `capabilities/` | 可复用的技术能力：Agent、Memory、工具集、模型、提示词、链 | 业务规则判断 |
 | 基础设施 | `infrastructure/` | 数据库驱动、连接池、底层 Repository | 业务逻辑 |
 
+### infrastructure/db 双层职责（强制）
+
+**base_repo.py = 对象↔SQL 双向映射层**。所有 SQL 语句的生成和结果解析必须经过此层：
+
+| 方向 | 输入 | 输出 | 方法 |
+|------|------|------|------|
+| **↓ 写入** | dict / Pydantic 对象 | 参数化 SQL + params tuple | `insert(data)` `update(pk,data)` `delete(pk)` `upsert(data)` |
+| **↑ 读取** | SQL 查询结果 (Row) | dict | `get_by_id(pk)` `list_rows(where)` `search(kw)` `count()` |
+
+```
+Service 层                              infrastructure/db
+=================                  ==============================
+business/                                 base_repo.py (对象↔SQL 双向映射)
+  构建 dict/Pydantic 对象       --write->   insert(data) → INSERT ... VALUES ($1,$2) → 执行
+  不写 SQL、不解析 Row          <-read--    get_by_id(pk) → SELECT → Row → dict
+                                 |
+                               ontology_repo.py (领域实现)
+                                 调用 BaseRepository 做通用映射
+                                 只写领域特有 SQL: 树形递归 / 继承链遍历 / 批量导入
+```
+
+| 层 | 文件 | 职责 | 禁止 |
+|----|------|------|------|
+| **对象↔SQL 映射** | `base_repo.py` | dict→参数化SQL+params; Row→dict; where子句/分页/排序/软删除 | 写死业务表名、写业务特有 JOIN |
+| **领域实现** | `ontology_repo.py` | 本体域特有查询, 调用 `BaseRepository` 做通用映射; 树形递归/继承链/批量导入 | **手写** `INSERT INTO` / `UPDATE SET` / `conn.execute(f"SELECT...")` |
+
+```python
+# ✅ 正确 — ontology_repo 委托 base_repo 做对象↔SQL 映射
+class OntologyRepo:
+    def __init__(self, pool):
+        self.model = BaseRepository(pool, "ontol_model", pk="id", soft_delete=True)
+        self.attr  = BaseRepository(pool, "ontol_model_attr", pk="id", soft_delete=True)
+
+    async def create_model(self, data: dict) -> dict:
+        return await self.model.insert(data)   # base_repo: dict → INSERT SQL → 执行 → 返回 dict
+
+    async def find_by_code(self, code: str) -> dict | None:
+        rows = await self.model.list_rows(where={"code": code}, limit=1)
+        return rows[0] if rows else None
+
+    async def get_tree(self, root_id: str = None) -> list[dict]:
+        # 领域特有递归 — base_repo 不覆盖的场景, 用 execute_raw
+        return await self.model.execute_raw("WITH RECURSIVE tree AS (...)")
+
+# ❌ 禁止 — 在任何层手写通用 CRUD 的 SQL
+def bad_insert(data: dict):
+    conn.execute("INSERT INTO ontol_model (id,name) VALUES (?,?)", ...)  # 绕过了 base_repo!
+```
+
+**调用链**: `routes/ → business/ (构建对象) → ontology_repo (领域逻辑) → base_repo (对象↔SQL 映射+执行)`
+### infrastructure/graph 双层职责（强制）
+
+**base_graph_repo.py = 对象→Cypher 转换器**。所有图数据库的 Cypher 语句生成必须经过此层：
+
+| 方向 | 输入 | 输出 | 方法 |
+|------|------|------|------|
+| **↓ 写入** | dict / Pydantic 对象 | 参数化 Cypher + params | `create_node(label,props)` `merge_edge(src,tgt,type,props)` `delete_node(id)` |
+| **↑ 读取** | Cypher 查询结果 (Record) | dict | `get_node(id)` `search_nodes(kw)` `list_nodes(label)` `get_relationships(id)` |
+
+```
+Service 层                              infrastructure/graph
+=================                  ================================
+business/reasoning/                 base_graph_repo.py (对象→Cypher)
+  step1_clone.py --clone-->          create_node/merge_edge/delete_node
+  step4_reason.py --traverse-->      get_relationships/get_outgoing_by_rel_type
+                                 |
+                               ontology_graph_repo.py (领域实现)
+                                 Label: TYPE_TO_LABEL (M_ENTITY->Entity, ...)
+                                 关系:  OWL2_SUBCLASS_OF / INFERENCE_ACTION_TYPE
+                                 遍历:  climb_subclass_chain / walk_inference_chain
+```
+
+| 层 | 文件 | 职责 | 禁止 |
+|----|------|------|------|
+| **对象→Cypher 映射** | `base_graph_repo.py` | dict→参数化Cypher+params; Record→dict; 通用 CRUD (create/merge/delete/search/relate) | 写死 Label 名、写死关系类型、写业务遍历逻辑 |
+| **领域实现** | `ontology_graph_repo.py` | 本体 Label 映射 (TYPE_TO_LABEL); 关系类型常量; 复杂图遍历 (climb_subclass_chain/walk_inference_chain) | 手写 `session.run("CREATE (n:Entity {...})")` |
+
+```python
+# 正确 -- ontology_graph_repo 调用 base_graph_repo 做映射
+from infrastructure.graph.base_graph_repo import GraphBaseRepo
+from infrastructure.graph.ontology_graph_repo import TYPE_TO_LABEL, OWL2_SUBCLASS_OF
+
+async def clone_entity(props: dict) -> dict:
+    repo = GraphBaseRepo()
+    label = TYPE_TO_LABEL.get(props.get("ont_type",""), "Entity")
+    return await repo.create_node(label, props)
+
+# 禁止 -- 在任何层手写 Cypher 字符串绕过 base_graph_repo
+session.run("CREATE (n:Entity {name: $name})", name="xxx")  # 绕过了 base_graph_repo!
+```
+
+**调用链**: `routes/ → business/ (构建对象) → ontology_graph_repo (领域遍历) → base_graph_repo (对象→Cypher+执行)`
+
+**Service 层约束（强制）**：
+
+| 层 | 允许 | 禁止 |
+|----|------|------|
+| **Service (`business/`)** | 构建 Python dict 对象传给 repo，做业务编排 | **写 SQL 字符串**、`sqlite3.connect()`、拼接 SQL |
+| **Repo (`infrastructure/db/`)** | 对象→SQL→执行→返回 dict | 做业务判断、调用 LLM、处理 HTTP |
+
 **路由函数应该是"薄的"**，理想不超过 15 行：
 
 ```python
@@ -464,7 +570,7 @@ async def get_item(item_id: str, repo=Depends(get_repo)):
 
 **迁移纪律**：发现违反分层规范的代码，发现一处迁移一处，禁止新增违规，禁止累积。
 
-**现状**：`ontology_routes.py` 已将上传解析/校验/符号填充/导入四步全部迁移至 `business/upload/auto_import/stepN_*.py`，路由层只做薄壳调用（每函数 ≤15 行）。清除了 `parser.py`/`prompts.py` 的 7 个死引用。图操作/场景管理/字典管理/LLM 配置等仍有迁移空间。
+**现状**：`ontology_routes.py` 已将上传解析/校验/符号填充/导入四步全部迁移至 ， 全部 SQL 移至 `business/upload/auto_import/stepN_*.py`，路由层只做薄壳调用（每函数 ≤15 行）。清除了 `parser.py`/`prompts.py` 的 7 个死引用。图操作/场景管理/字典管理/LLM 配置等仍有迁移空间。
 
 ### 业务模块间调用规范（强制）
 

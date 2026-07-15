@@ -210,14 +210,17 @@ d:/langchain/                        # 项目根（Git 仓库根）
 ├── infrastructure/                   # 基础设施层
 │   ├── __init__.py
 │   ├── INFRASTRUCTURE.md
-│   ├── db/
+│   ├── db/                            # 关系型数据库 (SQLite / PostgreSQL)
 │   │   ├── __init__.py
-│   │   ├── sqlite_db.py              # SQLite 自动建表+种子（17 张表）
-│   │   ├── base_repo.py              # BaseRepository 通用异步 CRUD 基类
+│   │   ├── sqlite_db.py              # SQLite 自动建表+种子 (21 张表)
+│   │   ├── base_repo.py              # 对象↔SQL 双向映射层 (insert/update/delete/list/search/upsert)
 │   │   ├── postgres.py               # asyncpg 连接池 + 健康检查
-│   │   ├── ontology_repo.py          # OntologyRepo — 本体模型数据访问层
-│   │   ├── neo4j.py                  # 图数据库驱动 + 连接池（Memgraph/Neo4j）
+│   │   ├── ontology_repo.py          # 领域实现: 树形查询 + 批量导入模型/字段 (调用 base_repo)
 │   │   └── ontol.db                  # 本体模型数据库文件
+│   ├── graph/                         # 图数据库 (Memgraph/Neo4j)
+│   │   ├── neo4j.py                  # Memgraph 驱动 (memgraph://→bolt:// 连接池)
+│   │   ├── base_graph_repo.py        # 对象→Cypher 转换器 (create_node/merge_edge/delete/search)
+│   │   └── ontology_graph_repo.py    # 领域实现: Label映射 + 关系类型常量 + 图遍历
 │   ├── cache/
 │   │   ├── __init__.py
 │   │   └── redis.py                  # Redis 客户端（缓存 + PubSub）
@@ -365,7 +368,8 @@ d:/langchain/                        # 项目根（Git 仓库根）
 | 编排 | `orchestrator/` | 图定义/编译/执行、状态管理、条件路由、checkpoint 持久化 | 直接构造 Prompt、定义 Tool 实现、管理连接池 |
 | 业务 | `business/` | 定义域专用图/状态/节点、编排域业务流程、暴露 Python 函数给其他模块调用（禁止内部 HTTP） | 跨域直接 import、导入 `gateway/`、模块间走 HTTP |
 | 能力 | `capabilities/` | Agent 定义、Chain 构建、Tool 实现、记忆存取、模型适配 | 处理 HTTP 请求、管理图状态、管理数据库连接 |
-| 基础设施 | `infrastructure/` | 连接池封装、客户端实例化、健康检查 | 包含 AI 逻辑、理解 LangChain/LangGraph 概念 |
+| 基础设施 | `infrastructure/db/` | 对象↔SQL 双向映射、连接池、Repository | 包含 AI 逻辑、业务判断 |
+| 图数据库 | `infrastructure/graph/` | 对象→Cypher 转换、图遍历、Label/关系映射 | 包含业务标签、理解本体语义逻辑 |
 | 共享 | `common/` | 配置读取、Pydantic Schema、异常类、工具函数 | 依赖任何上层或同层模块 |
 
 ---

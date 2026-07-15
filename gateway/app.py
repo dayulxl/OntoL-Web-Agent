@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """应用生命周期：启动时初始化数据库连接，关闭时释放。"""
-        from infrastructure.db.neo4j import create_driver, close_driver
+        from infrastructure.graph.neo4j import create_driver, close_driver
         from infrastructure.db.sqlite_db import create_sqlite_db
         from common.utils.logger import get_logger
 

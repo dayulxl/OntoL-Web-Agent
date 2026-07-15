@@ -114,7 +114,7 @@ async def get_graph():
     """
     获取 GraphMemory 实例（惰性导入，避免启动时图数据库未就绪而崩溃）。
     """
-    from infrastructure.db.neo4j import get_driver
+    from infrastructure.graph.neo4j import get_driver
     from capabilities.memory.graph_memory import GraphMemory
 
     try:
@@ -140,9 +140,9 @@ async def get_ontology_repo():
 
 async def _record_history(node_id: str, action: str, context: dict, create_id: str = ""):
     """将图数据变更写入 ontol_data_his 历史表。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     record = {
-        "id": _uuid.uuid4().hex[:16],
+        "id": new_id(),
         "node_id": str(node_id),
         "action": action,
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -160,7 +160,7 @@ async def _record_history(node_id: str, action: str, context: dict, create_id: s
 async def _bump_node_version(graph, node_id: int, node_name: str = ""):
     """递增图节点版本号。"""
     try:
-        from infrastructure.db.neo4j import get_driver
+        from infrastructure.graph.neo4j import get_driver
         driver = await get_driver()
         async with driver.session() as session:
             # 读取当前版本号
@@ -361,7 +361,7 @@ async def delete_edge(edge_id: int, graph=Depends(get_graph)):
     """删除关系。记录历史快照并递增版本号。"""
     try:
         # 删除前获取边信息用于记录
-        from infrastructure.db.neo4j import get_driver
+        from infrastructure.graph.neo4j import get_driver
         source_id = 0; target_id = 0
         try:
             driver = await get_driver()
@@ -470,7 +470,7 @@ async def infer_on_nodes(body: InferOnNodesBody):
             pass
         # 可能是 code 或名称
         try:
-            from infrastructure.db.neo4j import get_driver
+            from infrastructure.graph.neo4j import get_driver
             driver = await get_driver()
             async with driver.session() as session:
                 rec = await session.run(
@@ -528,7 +528,6 @@ async def list_ontology_models(
         if keyword:
             return await repo.search_models(keyword, limit=min(limit, 200))
         tree = await repo.get_full_tree_with_attrs()
-        # 补全继承字段数：子模型 badge 显示完整字段数而非 0
         for node in tree:
             if not node.get("attributes"):
                 inherited = _get_inherited_fields(node["id"])
@@ -536,6 +535,22 @@ async def list_ontology_models(
         return tree
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Database query failed: {e}")
+
+
+# [FEAT] 前端树刷新接口 — 直接调 page_routes._build_model_tree_for_view，不重写逻辑
+@router.get("/ontology-models/tree")
+async def get_treeview_data(attr_mapping: str = "00"):
+    from gateway.routes.page_routes import _build_model_tree_for_view
+    if attr_mapping == "01":
+        return _build_model_tree_for_view(
+            table="ontol_domain_model", parent_col="domain_parent_id",
+            desc_col="domain_description", attr_mapping="01",
+        )
+    return _build_model_tree_for_view(
+        table="ontol_model", parent_col="ontol_parent_id",
+        desc_col="ontol_model_desc", attr_mapping="00",
+        extra_cols="ontol_data_type AS type_code",
+    )
 
 
 @router.get("/ontology-models/stats")
@@ -631,9 +646,9 @@ async def get_ontology_model(model_id: str, repo=Depends(get_ontology_repo)):
 @router.post("/ontology-models", status_code=201)
 async def create_ontology_model(body: OntolModelCreateBody, repo=Depends(get_ontology_repo)):
     """创建本体模型（后端生成 UUID 主键，code 由用户指定并唯一校验）。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     data = body.model_dump()
-    data["id"] = _uuid.uuid4().hex[:16]  # 主键自动 UUID
+    data["id"] = new_id()  # 主键自动 UUID
     try:
         return await repo.model.insert(data)
     except Exception as e:
@@ -672,9 +687,9 @@ async def list_model_attrs(model_id: str, is_system: Optional[str] = None, repo=
 @router.post("/ontology-models/{model_id}/attrs", status_code=201)
 async def create_model_attr(model_id: str, body: OntolModelAttrCreateBody, repo=Depends(get_ontology_repo)):
     """创建模型属性（后端生成 UUID 主键，前端传的 id 会被忽略）。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     data = body.model_dump()
-    data["id"] = _uuid.uuid4().hex[:16]          # 用 UUID 覆盖前端传的 id
+    data["id"] = new_id()          # 用 UUID 覆盖前端传的 id
     data["ontol_model_id"] = model_id
     data.setdefault("create_time", datetime.utcnow())
     data.setdefault("delete_flag", "0")
@@ -781,6 +796,32 @@ async def import_model_attrs_excel(
         normalized.append(nr)
 
     return import_attrs(model_id, attr_mapping, normalized)
+
+
+# [FEAT] 模型导入 Excel 模板下载 — 薄路由，业务在 excel_service
+@router.get("/ontology-models/import-template")
+async def download_model_import_template(attr_mapping: str = "00"):
+    from business.tool.excel_handler import excel_response
+    from business.upload.excel_service import generate_model_import_template
+    tmp = generate_model_import_template(attr_mapping)
+    suffix = "_本体" if attr_mapping == "00" else "_业务语义"
+    return excel_response(tmp, f"模型导入模板{suffix}.xlsx")
+
+
+# [FEAT] 模型批量导入 — 薄路由，业务在 excel_service
+@router.post("/ontology-models/import-models")
+async def import_ontology_models_excel(
+    file: UploadFile = File(...),
+    attr_mapping: str = "00",
+):
+    from business.upload.excel_service import import_models_from_upload
+    try:
+        result = import_models_from_upload(await file.read(), file.filename or "", attr_mapping)
+        return {"ok": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入失败: {e}")
 
 
 # =========================================================================
@@ -1091,9 +1132,9 @@ async def get_scene(scene_id: str):
 @router.post("/scenes", status_code=201)
 async def create_scene(body: SceneCreate):
     """创建场景。id 留空时自动生成 UUID。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        scene_id = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        scene_id = body.id.strip() if body.id else new_id()
         existing = await _query_scene(
             "SELECT id FROM ontol_model_scene WHERE id=? AND delete_flag='0'",
             (scene_id,),
@@ -1282,9 +1323,9 @@ async def bind_chat_scenes(body: ChatSceneBind):
             (body.chat_id,),
         )
         # 批量插入新绑定
-        import uuid as _uuid
+        from business.tool.uuid_gen import new_id
         for sid in body.scene_ids:
-            rid = _uuid.uuid4().hex[:16]
+            rid = new_id()
             await _execute_scene(
                 "INSERT INTO ontol_char_scene_relation (id, scene_id) VALUES (?,?,?)",
                 (rid, body.sid),
@@ -1380,9 +1421,9 @@ async def get_prompt(prompt_id: str):
 @router.post("/scenes/{scene_id}/prompts", status_code=201)
 async def create_prompt(scene_id: str, body: ScenePromptCreate):
     """创建提示词。后端生成 UUID 主键。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        prompt_id = body.id if body.id else _uuid.uuid4().hex[:16]
+        prompt_id = body.id if body.id else new_id()
         existing = await _query_scene("SELECT id FROM ontol_scene_prompt WHERE id=?", (prompt_id,))
         if existing:
             raise HTTPException(status_code=409, detail=f"Prompt ID '{prompt_id}' already exists")
@@ -1499,9 +1540,9 @@ async def list_all_dicts(dictionary_type_id: str = ""):
 @router.post("/dictionaries", status_code=201)
 async def create_dict_direct(body: SceneDictCreate):
     """创建词典（直发接口，scene_id 从 body 传入）。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        dict_id = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        dict_id = body.id.strip() if body.id else new_id()
         existing = await _query_scene("SELECT id FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         if existing:
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
@@ -1535,9 +1576,9 @@ async def get_dict(dict_id: str):
 @router.post("/scenes/{scene_id}/dictionaries", status_code=201)
 async def create_dict(scene_id: str, body: SceneDictCreate):
     """创建场景词典，id 留空自动生成 UUID。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        dict_id = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        dict_id = body.id.strip() if body.id else new_id()
         existing = await _query_scene("SELECT id FROM ontol_scene_dictionary WHERE id=?", (dict_id,))
         if existing:
             raise HTTPException(status_code=409, detail=f"Dictionary ID '{dict_id}' already exists")
@@ -1630,9 +1671,9 @@ async def get_dict_type(type_id: str):
 @router.post("/dictionary-types", status_code=201)
 async def create_dict_type(body: DictTypeCreate):
     """创建词条分类。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        tid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        tid = body.id.strip() if body.id else new_id()
         await _execute_scene(
             "INSERT INTO ontol_dictionary_type (id, name, dictionary_description, is_system) VALUES (?,?,?,?)",
             (tid, body.name, body.dictionary_description or "", body.is_system),
@@ -1722,9 +1763,9 @@ async def get_llm_type_config(config_id: str):
 @router.post("/llm-type-configs", status_code=201)
 async def create_llm_type_config(body: LLMTypeConfigCreate):
     """创建 LLM 类型配置。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        cid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        cid = body.id.strip() if body.id else new_id()
         await _execute_scene(
             "INSERT INTO ontol_llm_type_config (id, name, llm_description, is_system) VALUES (?,?,?,?)",
             (cid, body.name, body.llm_description or "", body.is_system),
@@ -1795,33 +1836,21 @@ class LLMConfigUpdate(BaseModel):
 
 @router.get("/llm-configs")
 async def list_llm_configs(type_config_id: Optional[str] = None):
-    """列出 LLM 配置，可按类型配置ID筛选。"""
     try:
-        if type_config_id:
-            rows = await _query_scene(
-                "SELECT * FROM ontol_llm_config WHERE delete_flag='0' AND llm_type_config_id=? ORDER BY create_time DESC",
-                (type_config_id,),
-            )
-        else:
-            rows = await _query_scene(
-                "SELECT * FROM ontol_llm_config WHERE delete_flag='0' ORDER BY create_time DESC"
-            )
-        return rows
+        from business.llm.llm_config_service import list_configs
+        return list_configs(type_config_id or "")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query llm configs failed: {e}")
 
 
 @router.get("/llm-configs/{config_id}")
 async def get_llm_config(config_id: str):
-    """获取单个 LLM 配置详情。"""
     try:
-        rows = await _query_scene(
-            "SELECT * FROM ontol_llm_config WHERE id=? AND delete_flag='0'",
-            (config_id,),
-        )
-        if not rows:
+        from business.llm.llm_config_service import get_config
+        r = get_config(config_id)
+        if not r:
             raise HTTPException(status_code=404, detail=f"Config {config_id} not found")
-        return rows[0]
+        return r
     except HTTPException:
         raise
     except Exception as e:
@@ -1830,39 +1859,29 @@ async def get_llm_config(config_id: str):
 
 @router.post("/llm-configs", status_code=201)
 async def create_llm_config(body: LLMConfigCreate):
-    """创建 LLM 配置，id 留空自动 UUID。"""
-    import uuid as _uuid
     try:
-        cfg_id = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
-        existing = await _query_scene("SELECT id FROM ontol_llm_config WHERE id=?", (cfg_id,))
-        if existing:
-            raise HTTPException(status_code=409, detail=f"Config ID '{cfg_id}' already exists")
-        await _execute_scene(
-            "INSERT INTO ontol_llm_config (id, llm_type_config_id, name, llm_model, llm_url, llm_key, llm_description) VALUES (?,?,?,?,?,?,?)",
-            (cfg_id, body.llm_type_config_id or None, body.name, body.llm_model or None, body.llm_url or "", body.llm_key or "", body.llm_description or ""),
+        from business.llm.llm_config_service import create_config
+        return create_config(
+            name=body.name,
+            llm_type_config_id=body.llm_type_config_id or "",
+            llm_model=body.llm_model or "",
+            llm_url=body.llm_url or "",
+            llm_key=body.llm_key or "",
+            llm_description=body.llm_description or "",
+            config_id=body.id or "",
         )
-        rows = await _query_scene("SELECT * FROM ontol_llm_config WHERE id=?", (cfg_id,))
-        return rows[0]
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Create config failed: {e}")
 
 
 @router.put("/llm-configs/{config_id}")
 async def update_llm_config(config_id: str, body: LLMConfigUpdate):
-    """更新 LLM 配置。"""
     try:
-        existing = await _query_scene("SELECT id FROM ontol_llm_config WHERE id=? AND delete_flag='0'", (config_id,))
-        if not existing:
+        from business.llm.llm_config_service import update_config
+        r = update_config(config_id, body.model_dump(exclude_none=True))
+        if not r:
             raise HTTPException(status_code=404, detail=f"Config {config_id} not found")
-        data = body.model_dump(exclude_none=True)
-        if data:
-            set_clause = ", ".join(f"{k}=?" for k in data)
-            values = list(data.values()) + [config_id]
-            await _execute_scene(f"UPDATE ontol_llm_config SET {set_clause} WHERE id=?", tuple(values))
-        rows = await _query_scene("SELECT * FROM ontol_llm_config WHERE id=?", (config_id,))
-        return rows[0]
+        return r
     except HTTPException:
         raise
     except Exception as e:
@@ -1871,12 +1890,9 @@ async def update_llm_config(config_id: str, body: LLMConfigUpdate):
 
 @router.delete("/llm-configs/{config_id}")
 async def delete_llm_config(config_id: str, soft: bool = True):
-    """删除 LLM 配置（默认软删除）。"""
     try:
-        if soft:
-            await _execute_scene("UPDATE ontol_llm_config SET delete_flag='1' WHERE id=?", (config_id,))
-        else:
-            await _execute_scene("DELETE FROM ontol_llm_config WHERE id=?", (config_id,))
+        from business.llm.llm_config_service import delete_config
+        delete_config(config_id, soft=soft)
         return {"deleted": True, "config_id": config_id, "soft": soft}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete config failed: {e}")
@@ -1920,9 +1936,9 @@ async def get_function_type(type_id: str):
 
 @router.post("/function-types", status_code=201)
 async def create_function_type(body: FunctionTypeCreate):
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        tid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        tid = body.id.strip() if body.id else new_id()
         await _execute_scene(
             "INSERT INTO ontol_function_type (id, name, function_description, is_system) VALUES (?,?,?,?)",
             (tid, body.name, body.function_description or None, body.is_system or "0"),
@@ -2010,9 +2026,9 @@ async def get_function(func_id: str):
 
 @router.post("/functions", status_code=201)
 async def create_function(body: FunctionCreate):
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     try:
-        fid = body.id.strip() if body.id else _uuid.uuid4().hex[:16]
+        fid = body.id.strip() if body.id else new_id()
         await _execute_scene(
             "INSERT INTO ontol_function (id, function_type_id, code, name, function_classpath, function_method, function_type, function_timeout_ms, function_max_retry, status, description) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (fid, body.function_type_id or None, body.code, body.name, body.function_classpath or None, body.function_method or None, body.function_type or "PYTHON", body.function_timeout_ms or 30000, body.function_max_retry or 0, body.status or 1, body.description or None),
@@ -2084,9 +2100,9 @@ async def list_cope_versions():
 @router.post("/cope-versions")
 async def create_cope_version(body: CopeVersionCreate):
     """新增副本版本记录。"""
-    import uuid as _uuid
+    from business.tool.uuid_gen import new_id
     from datetime import datetime as _dt
-    rid = _uuid.uuid4().hex[:16]
+    rid = new_id()
     now = _dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     try:
         await _execute_scene(
@@ -2141,7 +2157,7 @@ async def delete_cope_version(cope_id: str):
 @router.delete("/cope-versions/{cope_id}/nodes")
 async def delete_cope_version_nodes(cope_id: str):
     """批量删除图数据库中 copy_version 匹配该记录 ID 的节点。"""
-    from infrastructure.db.neo4j import get_driver
+    from infrastructure.graph.neo4j import get_driver
 
     try:
         driver = await get_driver()
@@ -2181,7 +2197,7 @@ async def get_cope_graph(cope_id: str):
     - status=00: 返回没有 copy_version 属性的节点
     - 其他状态: 返回 copy_version=cope_id 的节点
     """
-    from infrastructure.db.neo4j import get_driver
+    from infrastructure.graph.neo4j import get_driver
 
     try:
         # 查副本状态
@@ -2280,8 +2296,8 @@ class ChatCopeVersionBind(BaseModel):
 @router.post("/chat-cope-versions/bind")
 async def bind_chat_cope_version(body: ChatCopeVersionBind):
     """将对话绑定到推演副本（先删旧绑定，再插入新绑定）。"""
-    import uuid as _uuid
-    rid = _uuid.uuid4().hex[:16]
+    from business.tool.uuid_gen import new_id
+    rid = new_id()
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     try:
         # 先清理旧绑定

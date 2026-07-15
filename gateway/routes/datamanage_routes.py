@@ -140,8 +140,8 @@ async def get_datasource_type(id: str):
 
 @router.post("/datamanage/datasource-types", status_code=201)
 async def create_datasource_type(body: DatasourceTypeCreate):
-    import uuid as _uuid
-    tid = _uuid.uuid4().hex[:16]
+    from business.tool.uuid_gen import new_id
+    tid = new_id()
     _exec(
         "INSERT INTO ontol_datasource_type (id,name,datasource_description,is_system) VALUES (?,?,?,?)",
         (tid, body.name, body.datasource_description, body.is_system),

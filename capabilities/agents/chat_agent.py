@@ -103,7 +103,7 @@ async def search_knowledge_graph(keyword: str) -> str:
         keyword: 搜索关键词（实体名称、编码等）
     """
     import time
-    from infrastructure.db.neo4j import get_driver
+    from infrastructure.graph.neo4j import get_driver
     from capabilities.memory.graph_memory import GraphMemory
     from common.utils.metrics import get_metrics
 
@@ -146,7 +146,7 @@ async def traverse_graph(entity_name: str, depth: int = 4) -> str:
         depth: 遍历深度（1-4，默认 4）
     """
     import time
-    from infrastructure.db.neo4j import get_driver
+    from infrastructure.graph.neo4j import get_driver
     from common.utils.metrics import get_metrics
 
     metrics = get_metrics()
@@ -536,9 +536,11 @@ async def create_chat_agent(
     if not row:
         raise ValueError(f"模型配置 {model_name} 不存在")
 
+    from business.llm.llm_config_service import resolve_api_key
+
     llm_iface = factory.create_llm_from_config(
         base_url=row["llm_url"] or "",
-        api_key=row["llm_key"] or "",
+        api_key=resolve_api_key(model_name),
         model_name=row["llm_model"] or row["name"],
     )
     llm = await llm_iface.get_llm()

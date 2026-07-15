@@ -10,7 +10,7 @@
 - 前端页面 → GET /api/v1/audit-logs → list_audit_logs()
 """
 import sqlite3
-import uuid as _uuid
+from business.tool.uuid_gen import new_id
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -208,8 +208,8 @@ def submit_audit(
     返回: 新建的审核记录 ID
     """
     if not batch_id:
-        batch_id = _uuid.uuid4().hex[:12]
-    log_id = _uuid.uuid4().hex[:16]
+        batch_id = new_id()[:12]
+    log_id = new_id()
     conn = _connect()
     try:
         conn.execute(
@@ -287,7 +287,7 @@ def create_audit_log(data: AuditLogCreate) -> str:
         from business.audit import create_audit_log, AuditLogCreate
         log_id = create_audit_log(AuditLogCreate(node_id="n1", batch_id="b1", input_snapshot="{...}"))
     """
-    log_id = data.node_id and _uuid.uuid4().hex[:16] or _uuid.uuid4().hex[:16]
+    log_id = data.node_id and new_id() or new_id()
     conn = _connect()
     try:
         conn.execute(

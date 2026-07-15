@@ -3,7 +3,7 @@
 --------
 验证请求的 API Key / JWT Token，注入 user_id 到请求上下文中。
 """
-import uuid
+from business.tool.uuid_gen import new_id
 from contextvars import ContextVar
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -31,7 +31,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # 提取 trace_id（若无则生成）
-        trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4()))
+        trace_id = request.headers.get("X-Trace-ID", new_id())
 
         # 鉴权验证
         user_id = "anonymous"
